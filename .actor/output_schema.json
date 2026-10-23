@@ -1,0 +1,21 @@
+{
+    "actorOutputSchemaVersion": 1,
+    "title": "Instagram Scraper Pro output",
+    "properties": {
+        "results": {
+            "type": "string",
+            "title": "Results (Overview)",
+            "template": "{{links.apiDefaultDatasetUrl}}/items?view=overview"
+        },
+        "runSummary": {
+            "type": "string",
+            "title": "Run summary (per input: saved, skipped and why)",
+            "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/RUN_SUMMARY"
+        },
+        "diagnostics": {
+            "type": "string",
+            "title": "Diagnostics (which Instagram methods worked)",
+            "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/DIAGNOSTICS"
+        }
+    }
+}

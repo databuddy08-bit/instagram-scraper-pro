@@ -1,0 +1,641 @@
+{
+    "actorSpecification": 1,
+    "fields": {},
+    "views": {
+        "overview": {
+            "title": "Overview",
+            "transformation": {
+                "fields": [
+                    "status",
+                    "resultType",
+                    "inputUrl",
+                    "url",
+                    "shortCode",
+                    "type",
+                    "productType",
+                    "ownerUsername",
+                    "ownerFullName",
+                    "caption",
+                    "hashtags",
+                    "mentions",
+                    "likesCount",
+                    "likesHidden",
+                    "commentsCount",
+                    "videoViewCount",
+                    "videoPlayCount",
+                    "videoDuration",
+                    "engagementRate",
+                    "ownerFollowersCount",
+                    "timestamp",
+                    "isPinned",
+                    "isSponsored",
+                    "displayUrl",
+                    "videoUrl",
+                    "images",
+                    "childPosts",
+                    "taggedUsers",
+                    "coauthorProducers",
+                    "locationName",
+                    "musicInfo",
+                    "firstComment",
+                    "latestComments",
+                    "text",
+                    "commentUrl",
+                    "postUrl",
+                    "repliesCount",
+                    "parentCommentId",
+                    "ownerIsVerified",
+                    "username",
+                    "fullName",
+                    "biography",
+                    "followersCount",
+                    "followsCount",
+                    "postsCount",
+                    "verified",
+                    "private",
+                    "isBusinessAccount",
+                    "businessCategoryName",
+                    "category",
+                    "externalUrl",
+                    "businessEmail",
+                    "businessPhone",
+                    "emailsFromBio",
+                    "phonesFromBio",
+                    "avgLikes",
+                    "avgComments",
+                    "lastPostAt",
+                    "relatedProfiles",
+                    "name",
+                    "postsPerDayEstimate",
+                    "relatedHashtags",
+                    "locationId",
+                    "lat",
+                    "lng",
+                    "address",
+                    "city",
+                    "phone",
+                    "searchTerm",
+                    "dataSource",
+                    "id",
+                    "error",
+                    "fixHint",
+                    "scrapedAt"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "status": {
+                        "label": "Status",
+                        "format": "text"
+                    },
+                    "resultType": {
+                        "label": "Result type",
+                        "format": "text"
+                    },
+                    "inputUrl": {
+                        "label": "Input URL",
+                        "format": "link"
+                    },
+                    "url": {
+                        "label": "URL",
+                        "format": "link"
+                    },
+                    "shortCode": {
+                        "label": "Short code",
+                        "format": "text"
+                    },
+                    "type": {
+                        "label": "Media type",
+                        "format": "text"
+                    },
+                    "productType": {
+                        "label": "Product type",
+                        "format": "text"
+                    },
+                    "ownerUsername": {
+                        "label": "Owner username",
+                        "format": "text"
+                    },
+                    "ownerFullName": {
+                        "label": "Owner full name",
+                        "format": "text"
+                    },
+                    "caption": {
+                        "label": "Caption",
+                        "format": "text"
+                    },
+                    "hashtags": {
+                        "label": "Hashtags",
+                        "format": "array"
+                    },
+                    "mentions": {
+                        "label": "Mentions",
+                        "format": "array"
+                    },
+                    "likesCount": {
+                        "label": "Likes",
+                        "format": "number"
+                    },
+                    "likesHidden": {
+                        "label": "Likes hidden",
+                        "format": "boolean"
+                    },
+                    "commentsCount": {
+                        "label": "Comments",
+                        "format": "number"
+                    },
+                    "videoViewCount": {
+                        "label": "Video views",
+                        "format": "number"
+                    },
+                    "videoPlayCount": {
+                        "label": "Video plays",
+                        "format": "number"
+                    },
+                    "videoDuration": {
+                        "label": "Video duration (s)",
+                        "format": "number"
+                    },
+                    "engagementRate": {
+                        "label": "Engagement rate %",
+                        "format": "number"
+                    },
+                    "ownerFollowersCount": {
+                        "label": "Owner followers",
+                        "format": "number"
+                    },
+                    "timestamp": {
+                        "label": "Posted at",
+                        "format": "date"
+                    },
+                    "isPinned": {
+                        "label": "Pinned",
+                        "format": "boolean"
+                    },
+                    "isSponsored": {
+                        "label": "Paid partnership",
+                        "format": "boolean"
+                    },
+                    "displayUrl": {
+                        "label": "Image",
+                        "format": "image"
+                    },
+                    "videoUrl": {
+                        "label": "Video URL",
+                        "format": "link"
+                    },
+                    "images": {
+                        "label": "Carousel images",
+                        "format": "array"
+                    },
+                    "childPosts": {
+                        "label": "Carousel items",
+                        "format": "array"
+                    },
+                    "taggedUsers": {
+                        "label": "Tagged users",
+                        "format": "array"
+                    },
+                    "coauthorProducers": {
+                        "label": "Co-authors",
+                        "format": "array"
+                    },
+                    "locationName": {
+                        "label": "Location",
+                        "format": "text"
+                    },
+                    "musicInfo": {
+                        "label": "Music",
+                        "format": "object"
+                    },
+                    "firstComment": {
+                        "label": "First comment",
+                        "format": "text"
+                    },
+                    "latestComments": {
+                        "label": "Latest comments",
+                        "format": "array"
+                    },
+                    "text": {
+                        "label": "Comment text",
+                        "format": "text"
+                    },
+                    "commentUrl": {
+                        "label": "Comment URL",
+                        "format": "link"
+                    },
+                    "postUrl": {
+                        "label": "Post URL",
+                        "format": "link"
+                    },
+                    "repliesCount": {
+                        "label": "Replies",
+                        "format": "number"
+                    },
+                    "parentCommentId": {
+                        "label": "Parent comment ID",
+                        "format": "text"
+                    },
+                    "ownerIsVerified": {
+                        "label": "Owner verified",
+                        "format": "boolean"
+                    },
+                    "username": {
+                        "label": "Username",
+                        "format": "text"
+                    },
+                    "fullName": {
+                        "label": "Full name",
+                        "format": "text"
+                    },
+                    "biography": {
+                        "label": "Biography",
+                        "format": "text"
+                    },
+                    "followersCount": {
+                        "label": "Followers",
+                        "format": "number"
+                    },
+                    "followsCount": {
+                        "label": "Following",
+                        "format": "number"
+                    },
+                    "postsCount": {
+                        "label": "Posts count",
+                        "format": "number"
+                    },
+                    "verified": {
+                        "label": "Verified",
+                        "format": "boolean"
+                    },
+                    "private": {
+                        "label": "Private",
+                        "format": "boolean"
+                    },
+                    "isBusinessAccount": {
+                        "label": "Business account",
+                        "format": "boolean"
+                    },
+                    "businessCategoryName": {
+                        "label": "Business category",
+                        "format": "text"
+                    },
+                    "category": {
+                        "label": "Category",
+                        "format": "text"
+                    },
+                    "externalUrl": {
+                        "label": "External URL",
+                        "format": "link"
+                    },
+                    "businessEmail": {
+                        "label": "Business email",
+                        "format": "text"
+                    },
+                    "businessPhone": {
+                        "label": "Business phone",
+                        "format": "text"
+                    },
+                    "emailsFromBio": {
+                        "label": "Emails in bio",
+                        "format": "array"
+                    },
+                    "phonesFromBio": {
+                        "label": "Phones in bio",
+                        "format": "array"
+                    },
+                    "avgLikes": {
+                        "label": "Avg likes",
+                        "format": "number"
+                    },
+                    "avgComments": {
+                        "label": "Avg comments",
+                        "format": "number"
+                    },
+                    "lastPostAt": {
+                        "label": "Last post",
+                        "format": "date"
+                    },
+                    "relatedProfiles": {
+                        "label": "Related profiles",
+                        "format": "array"
+                    },
+                    "name": {
+                        "label": "Name (hashtag/place)",
+                        "format": "text"
+                    },
+                    "postsPerDayEstimate": {
+                        "label": "Posts per day (est.)",
+                        "format": "number"
+                    },
+                    "relatedHashtags": {
+                        "label": "Related hashtags",
+                        "format": "array"
+                    },
+                    "locationId": {
+                        "label": "Place ID",
+                        "format": "text"
+                    },
+                    "lat": {
+                        "label": "Latitude",
+                        "format": "number"
+                    },
+                    "lng": {
+                        "label": "Longitude",
+                        "format": "number"
+                    },
+                    "address": {
+                        "label": "Address",
+                        "format": "text"
+                    },
+                    "city": {
+                        "label": "City",
+                        "format": "text"
+                    },
+                    "phone": {
+                        "label": "Phone",
+                        "format": "text"
+                    },
+                    "searchTerm": {
+                        "label": "Search term",
+                        "format": "text"
+                    },
+                    "dataSource": {
+                        "label": "Data source",
+                        "format": "text"
+                    },
+                    "id": {
+                        "label": "ID",
+                        "format": "text"
+                    },
+                    "error": {
+                        "label": "Error",
+                        "format": "text"
+                    },
+                    "fixHint": {
+                        "label": "How to fix",
+                        "format": "text"
+                    },
+                    "scrapedAt": {
+                        "label": "Scraped at",
+                        "format": "date"
+                    }
+                }
+            }
+        },
+        "posts": {
+            "title": "Posts & reels",
+            "transformation": {
+                "fields": [
+                    "url",
+                    "ownerUsername",
+                    "type",
+                    "productType",
+                    "caption",
+                    "likesCount",
+                    "commentsCount",
+                    "videoPlayCount",
+                    "engagementRate",
+                    "timestamp",
+                    "hashtags",
+                    "mentions",
+                    "displayUrl",
+                    "videoUrl",
+                    "isPinned",
+                    "inputUrl"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "url": {
+                        "label": "URL",
+                        "format": "link"
+                    },
+                    "ownerUsername": {
+                        "label": "Owner username",
+                        "format": "text"
+                    },
+                    "type": {
+                        "label": "Media type",
+                        "format": "text"
+                    },
+                    "productType": {
+                        "label": "Product type",
+                        "format": "text"
+                    },
+                    "caption": {
+                        "label": "Caption",
+                        "format": "text"
+                    },
+                    "likesCount": {
+                        "label": "Likes",
+                        "format": "number"
+                    },
+                    "commentsCount": {
+                        "label": "Comments",
+                        "format": "number"
+                    },
+                    "videoPlayCount": {
+                        "label": "Video plays",
+                        "format": "number"
+                    },
+                    "engagementRate": {
+                        "label": "Engagement rate %",
+                        "format": "number"
+                    },
+                    "timestamp": {
+                        "label": "Posted at",
+                        "format": "date"
+                    },
+                    "hashtags": {
+                        "label": "Hashtags",
+                        "format": "array"
+                    },
+                    "mentions": {
+                        "label": "Mentions",
+                        "format": "array"
+                    },
+                    "displayUrl": {
+                        "label": "Image",
+                        "format": "image"
+                    },
+                    "videoUrl": {
+                        "label": "Video URL",
+                        "format": "link"
+                    },
+                    "isPinned": {
+                        "label": "Pinned",
+                        "format": "boolean"
+                    },
+                    "inputUrl": {
+                        "label": "Input URL",
+                        "format": "link"
+                    }
+                }
+            }
+        },
+        "comments": {
+            "title": "Comments",
+            "transformation": {
+                "fields": [
+                    "postUrl",
+                    "ownerUsername",
+                    "text",
+                    "likesCount",
+                    "repliesCount",
+                    "parentCommentId",
+                    "timestamp",
+                    "commentUrl"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "postUrl": {
+                        "label": "Post URL",
+                        "format": "link"
+                    },
+                    "ownerUsername": {
+                        "label": "Owner username",
+                        "format": "text"
+                    },
+                    "text": {
+                        "label": "Comment text",
+                        "format": "text"
+                    },
+                    "likesCount": {
+                        "label": "Likes",
+                        "format": "number"
+                    },
+                    "repliesCount": {
+                        "label": "Replies",
+                        "format": "number"
+                    },
+                    "parentCommentId": {
+                        "label": "Parent comment ID",
+                        "format": "text"
+                    },
+                    "timestamp": {
+                        "label": "Posted at",
+                        "format": "date"
+                    },
+                    "commentUrl": {
+                        "label": "Comment URL",
+                        "format": "link"
+                    }
+                }
+            }
+        },
+        "profiles": {
+            "title": "Profiles",
+            "transformation": {
+                "fields": [
+                    "username",
+                    "fullName",
+                    "followersCount",
+                    "followsCount",
+                    "postsCount",
+                    "verified",
+                    "isBusinessAccount",
+                    "category",
+                    "engagementRate",
+                    "businessEmail",
+                    "emailsFromBio",
+                    "externalUrl",
+                    "biography"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "username": {
+                        "label": "Username",
+                        "format": "text"
+                    },
+                    "fullName": {
+                        "label": "Full name",
+                        "format": "text"
+                    },
+                    "followersCount": {
+                        "label": "Followers",
+                        "format": "number"
+                    },
+                    "followsCount": {
+                        "label": "Following",
+                        "format": "number"
+                    },
+                    "postsCount": {
+                        "label": "Posts count",
+                        "format": "number"
+                    },
+                    "verified": {
+                        "label": "Verified",
+                        "format": "boolean"
+                    },
+                    "isBusinessAccount": {
+                        "label": "Business account",
+                        "format": "boolean"
+                    },
+                    "category": {
+                        "label": "Category",
+                        "format": "text"
+                    },
+                    "engagementRate": {
+                        "label": "Engagement rate %",
+                        "format": "number"
+                    },
+                    "businessEmail": {
+                        "label": "Business email",
+                        "format": "text"
+                    },
+                    "emailsFromBio": {
+                        "label": "Emails in bio",
+                        "format": "array"
+                    },
+                    "externalUrl": {
+                        "label": "External URL",
+                        "format": "link"
+                    },
+                    "biography": {
+                        "label": "Biography",
+                        "format": "text"
+                    }
+                }
+            }
+        },
+        "failed": {
+            "title": "Failed inputs",
+            "transformation": {
+                "fields": [
+                    "status",
+                    "inputUrl",
+                    "error",
+                    "fixHint"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "status": {
+                        "label": "Status",
+                        "format": "text"
+                    },
+                    "inputUrl": {
+                        "label": "Input URL",
+                        "format": "link"
+                    },
+                    "error": {
+                        "label": "Error",
+                        "format": "text"
+                    },
+                    "fixHint": {
+                        "label": "How to fix",
+                        "format": "text"
+                    }
+                }
+            }
+        }
+    }
+}

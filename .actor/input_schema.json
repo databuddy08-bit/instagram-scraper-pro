@@ -1,0 +1,180 @@
+{
+    "title": "Instagram Scraper Pro input",
+    "description": "Scrape Instagram posts, reels, comments, mentions and details from URLs or search.",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "directUrls": {
+            "title": "Instagram URLs",
+            "type": "array",
+            "editor": "stringList",
+            "sectionCaption": "What to scrape",
+            "description": "One per line: profile (instagram.com/nike/ or @nike), profile ID, post or reel URL (shortcode or numeric ID), hashtag (instagram.com/explore/tags/travel/ or #travel), place (instagram.com/explore/locations/7538318/), share links and story links. Each URL's type decides what it can return. URLs take priority over Search.",
+            "prefill": [
+                "https://www.instagram.com/natgeo/"
+            ]
+        },
+        "resultsType": {
+            "title": "Content to scrape",
+            "type": "string",
+            "editor": "select",
+            "enum": [
+                "posts",
+                "reels",
+                "comments",
+                "mentions",
+                "details"
+            ],
+            "enumTitles": [
+                "Posts (profiles, hashtags, places)",
+                "Reels (profiles, hashtags, places)",
+                "Comments (post and reel URLs)",
+                "Mentions — posts where a profile is tagged",
+                "Details (profile, hashtag, place or post info)"
+            ],
+            "default": "posts",
+            "description": "One content type per run. Profiles → posts, reels, mentions or details. Posts/reels → details or comments. Hashtags and places → posts, reels or details."
+        },
+        "resultsLimit": {
+            "title": "Max results per URL",
+            "type": "integer",
+            "minimum": 1,
+            "default": 50,
+            "description": "How many results to save for each URL or search hit. Comment replies (when turned on) are extra."
+        },
+        "maxItems": {
+            "title": "Max results in total",
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Stop the whole run after this many saved (and charged) results. 0 = no limit."
+        },
+        "search": {
+            "title": "Search terms",
+            "type": "string",
+            "editor": "textfield",
+            "default": "",
+            "sectionCaption": "Or discover by search (used only when no URLs are given)",
+            "description": "Comma-separated, e.g. \"travel, fitness\" for hashtags, \"nike, adidas\" for profiles, or \"vintage shop copenhagen\" for places. Hashtags without the #."
+        },
+        "searchType": {
+            "title": "Search type",
+            "type": "string",
+            "editor": "select",
+            "enum": [
+                "hashtag",
+                "user",
+                "place"
+            ],
+            "enumTitles": [
+                "Hashtags",
+                "Profiles",
+                "Places"
+            ],
+            "default": "hashtag",
+            "description": "What to search for. Found items are scraped with the \"Content to scrape\" setting."
+        },
+        "searchLimit": {
+            "title": "Max search hits per term",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 250,
+            "default": 10,
+            "description": "How many hashtags, profiles or places to take from each search term."
+        },
+        "onlyPostsNewerThan": {
+            "title": "Only posts newer than",
+            "type": "string",
+            "editor": "textfield",
+            "default": "",
+            "sectionCaption": "Filters (filtered results are never charged)",
+            "description": "Relative (\"3 days\", \"2 weeks\", \"6 months\") or a date (\"2024-09-05\", \"2024-09-05T13:22:04Z\"). UTC. Leave empty for all posts. Profile scraping stops paging once it reaches older posts."
+        },
+        "skipPinnedPosts": {
+            "title": "Skip pinned posts",
+            "type": "boolean",
+            "default": false,
+            "description": "Leave out posts pinned to the top of a profile (often old)."
+        },
+        "minLikes": {
+            "title": "Min likes",
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Skip posts with fewer likes. Posts with hidden like counts are skipped when this is set. 0 = off."
+        },
+        "minComments": {
+            "title": "Min comments",
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Skip posts with fewer comments. 0 = off."
+        },
+        "isNewestComments": {
+            "title": "Newest comments first",
+            "type": "boolean",
+            "default": false,
+            "sectionCaption": "Comments",
+            "description": "Fetch comments newest-first instead of Instagram's default \"most relevant\" order."
+        },
+        "includeNestedComments": {
+            "title": "Include replies",
+            "type": "boolean",
+            "default": false,
+            "description": "Also save replies to comments, each as its own row with parentCommentId. Replies don't count toward \"Max results per URL\"."
+        },
+        "addParentData": {
+            "title": "Add parent data to each result",
+            "type": "boolean",
+            "default": false,
+            "sectionCaption": "Output",
+            "description": "Adds a parentData object to every row (the profile, hashtag, place or post it came from)."
+        },
+        "includeFailedInputs": {
+            "title": "Show failed inputs in the results",
+            "type": "boolean",
+            "default": true,
+            "description": "Adds one row per input that returned nothing (status = blocked / not_found / private / no_results / invalid_input) with the reason and how to fix it. Never charged."
+        },
+        "skipPreviouslyScraped": {
+            "title": "Skip results saved in previous runs",
+            "type": "boolean",
+            "default": false,
+            "sectionCaption": "Deduplication",
+            "description": "Remembers saved post, comment and profile IDs in a named key-value store, so scheduled runs only save (and charge) new items."
+        },
+        "dedupeStoreName": {
+            "title": "Memory store name",
+            "type": "string",
+            "editor": "textfield",
+            "pattern": "^[a-z0-9-]{1,63}$",
+            "default": "instagram-scraper-pro-seen",
+            "description": "Name of the key-value store that remembers saved IDs. Lowercase letters, numbers and hyphens."
+        },
+        "saveRawResponses": {
+            "title": "Save raw responses (debug)",
+            "type": "boolean",
+            "default": false,
+            "sectionCaption": "Advanced",
+            "description": "Saves the first 2 raw Instagram responses per method to the key-value store (RAW_* records). Turn on only when the developer asks for it."
+        },
+        "proxyConfiguration": {
+            "title": "Proxy configuration",
+            "type": "object",
+            "editor": "proxy",
+            "prefill": {
+                "useApifyProxy": true,
+                "apifyProxyGroups": [
+                    "RESIDENTIAL"
+                ]
+            },
+            "default": {
+                "useApifyProxy": true,
+                "apifyProxyGroups": [
+                    "RESIDENTIAL"
+                ]
+            },
+            "description": "Instagram blocks datacenter IPs. Keep Apify Proxy with the RESIDENTIAL group."
+        }
+    }
+}

@@ -74,6 +74,9 @@
                     "address",
                     "city",
                     "phone",
+                    "dataCompleteness",
+                    "missingFields",
+                    "missingReason",
                     "searchTerm",
                     "dataSource",
                     "id",
@@ -380,6 +383,18 @@
                     "scrapedAt": {
                         "label": "Scraped at",
                         "format": "date"
+                    },
+                    "dataCompleteness": {
+                        "label": "Data completeness",
+                        "format": "text"
+                    },
+                    "missingFields": {
+                        "label": "Missing fields",
+                        "format": "array"
+                    },
+                    "missingReason": {
+                        "label": "Why fields are missing",
+                        "format": "text"
                     }
                 }
             }
@@ -544,7 +559,9 @@
                     "businessEmail",
                     "emailsFromBio",
                     "externalUrl",
-                    "biography"
+                    "biography",
+                    "dataCompleteness",
+                    "missingFields"
                 ]
             },
             "display": {
@@ -601,6 +618,14 @@
                     "biography": {
                         "label": "Biography",
                         "format": "text"
+                    },
+                    "dataCompleteness": {
+                        "label": "Data completeness",
+                        "format": "text"
+                    },
+                    "missingFields": {
+                        "label": "Missing fields",
+                        "format": "array"
                     }
                 }
             }

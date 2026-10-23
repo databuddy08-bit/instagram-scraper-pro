@@ -1,6 +1,6 @@
 // Instagram Scraper Pro — Apify actor entry point.
 import { Actor, log } from 'apify';
-import { Client, Session, NotFoundError, BlockedError, StoppedError } from './client.js';
+import { Client, Session, NotFoundError, BlockedError, StoppedError, LoginWallError } from './client.js';
 import { makeEndpoints, normalizePost } from './endpoints.js';
 import { profileFromUser, commentFromGraph, commentFromV1, relatedFromPosts, postsPerDayFromPosts, postFromGraph } from './parse.js';
 import { parseTarget, parseNewerThan } from './urls.js';
@@ -105,6 +105,11 @@ const FIX = {
 const blockedHint = (err) => (residential
     ? `Instagram refused every method for this input. Run it again in a few minutes (new residential IPs often get through). If it keeps failing, send the DIAGNOSTICS record from Storage → Key-value store to the developer. Last reply: ${err?.message ?? 'unknown'}`
     : `Instagram blocked the request. This run used ${proxyLabel} — set Proxy configuration to Apify Proxy with the RESIDENTIAL group and run again.`);
+
+const WALL_TEXT = {
+    comments: 'Comments', mentions: 'Mentions (tagged posts)', details: 'These details', posts: 'These posts', reels: 'These reels',
+};
+const loginHint = () => `${WALL_TEXT[opts.resultsType] ?? 'This data'} currently require a logged-in Instagram account for this input — Instagram showed its login wall on every method${residential ? '' : ` (proxy: ${proxyLabel}; try RESIDENTIAL)`}. Not charged. Profile posts and reels work without login; hashtags, places, comments and mentions are often walled. Run again later, as Instagram changes these walls often.`;
 
 function saveFailed(t, status, error, fixHint) {
     bump(summary.statusCounts, status);
@@ -233,19 +238,7 @@ async function paginate(t, first, fetchPage, emitPage) {
 
 // ---------- Handlers ----------
 
-async function loadUser(t, session) {
-    if (t.kind === 'profileId') {
-        const r = await ep.usernameById(t.value, session);
-        t.rec.methods.add(r.method);
-        t.value = r.data;
-        t.kind = 'profile';
-    }
-    const r = await ep.profileByUsername(t.value, session);
-    t.rec.methods.add(r.method);
-    return r;
-}
-
-/** Cursor after the 12 posts that come with the profile: GraphQL end_cursor plus the mobile-API max_id (last post ID), so either method can continue. */
+/** Cursor after the 12 posts that come with a full profile: GraphQL end_cursor plus the mobile-API max_id (last post ID). */
 function firstCursor(user) {
     const tc = user.edge_owner_to_timeline_media;
     if (!tc?.page_info?.has_next_page) return null;
@@ -253,12 +246,75 @@ function firstCursor(user) {
     return { graph: tc.page_info.end_cursor, v1: last ? `${last}_${user.id}` : undefined };
 }
 
+const MISSING_WITHOUT_PROFILE = ['biography', 'externalUrl', 'followsCount', 'businessEmail', 'businessPhone', 'businessCategoryName', 'relatedProfiles', 'highlightReelCount'];
+
+/**
+ * Loads a profile. Full profile data (followers, bio, contacts) comes from Instagram's profile endpoint when it answers;
+ * otherwise the posts feed (works logged-out) supplies the account, its ID and latest posts, plus page meta for counts.
+ * @returns {{ user:{id,username}, profile:object, posts:object[], cursor:object|null, method:string, partial:boolean }}
+ */
+async function loadProfile(t, session, { wantFull }) {
+    let feed = null;
+    if (t.kind === 'profileId') {
+        const r = await ep.feedById(t.value, null, session);
+        t.rec.methods.add(r.method);
+        const username = r.data.user?.username ?? r.data.posts.find((p) => p.ownerId === t.value)?.ownerUsername;
+        if (!username) throw new NotFoundError(`no public account or posts found for profile ID ${t.value}`);
+        feed = { ...r, data: { ...r.data, user: { ...r.data.user, username } } };
+        t.value = username;
+        t.kind = 'profile';
+        t.rec.resolvedTo = `@${username}`;
+    }
+    // 1) full profile, unless this run already proved it is login-walled
+    if (wantFull && !client.diag.hopeless('profile:web_profile_info')) {
+        try {
+            const r = await ep.profileInfo(t.value, session);
+            t.rec.methods.add(r.method);
+            const u = r.data;
+            return { user: { id: String(u.id), username: u.username }, profile: profileFromUser(u), posts: (u.edge_owner_to_timeline_media?.edges ?? []).map((e) => postFromGraph(e.node)), cursor: firstCursor(u), method: r.method, partial: false };
+        } catch (err) {
+            if (err instanceof NotFoundError || err instanceof StoppedError) throw err;
+            t.rec.profileEndpoint = err.message.slice(0, 200);
+        }
+    }
+    // 2) posts feed: account, ID and latest posts
+    if (!feed) {
+        feed = await ep.feedByUsername(t.value, null, session);
+        t.rec.methods.add(feed.method);
+    }
+    const fu = feed.data.user ?? {};
+    let meta = null;
+    if (opts.resultsType === 'details' && !client.diag.hopeless('profile:page_meta')) {
+        try {
+            const m = await ep.profileMeta(t.value, session);
+            t.rec.methods.add(m.method);
+            meta = m.data;
+        } catch (err) {
+            if (err instanceof StoppedError) throw err;
+        }
+    }
+    const synth = {
+        id: fu.id, username: fu.username ?? t.value, full_name: fu.full_name ?? meta?.fullName ?? null, is_private: fu.is_private, is_verified: fu.is_verified,
+        profile_pic_url: fu.profile_pic_url, follower_count: meta?.followers ?? undefined, following_count: meta?.following ?? undefined,
+        media_count: meta?.posts ?? undefined, biography: meta?.bio ?? '',
+    };
+    const profile = profileFromUser(synth, { posts: feed.data.posts });
+    const missing = MISSING_WITHOUT_PROFILE.filter((f) => !(f === 'biography' && meta?.bio) && !(f === 'followsCount' && meta?.following !== undefined));
+    if (meta?.followers === undefined || meta === null) missing.unshift('followersCount', 'postsCount', 'engagementRate');
+    profile.dataCompleteness = 'partial';
+    profile.missingFields = missing;
+    profile.missingReason = 'Instagram login-walled the full profile endpoint for this run; data comes from the public posts feed'
+        + (meta ? ' and the profile page (counts may be rounded, e.g. 283M).' : '.');
+    if (meta) profile.countsApproximate = meta.approximate;
+    return { user: { id: fu.id, username: profile.username }, profile, posts: feed.data.posts, cursor: feed.data.next, method: feed.method, partial: true };
+}
+
 async function handleProfile(t, session) {
     if (opts.resultsType === 'comments') {
         return saveFailed(t, 'unsupported_combination', 'comments need post or reel URLs', 'Comments are scraped from post/reel URLs. For a profile, choose "posts", "reels", "mentions" or "details".');
     }
-    const { data: user, method } = await loadUser(t, session);
-    const profile = profileFromUser(user);
+    const loaded = await loadProfile(t, session, { wantFull: opts.resultsType === 'details' || opts.resultsType === 'posts' });
+    const { profile, user, method } = loaded;
     t.parent = { type: 'profile', username: profile.username, fullName: profile.fullName, followersCount: profile.followersCount, verified: profile.verified };
     if (opts.resultsType === 'details') {
         const r = await emit(t, 'profile', profile, method);
@@ -266,13 +322,11 @@ async function handleProfile(t, session) {
         return;
     }
     if (profile.private) return saveFailed(t, 'private', `@${profile.username} is a private account`);
+    if (!user.id) throw new BlockedError('could not read the account ID');
     const followers = profile.followersCount;
-    const tc = user.edge_owner_to_timeline_media;
-
     if (opts.resultsType === 'posts') {
-        const firstPosts = (tc?.edges ?? []).map((e) => postFromGraph(e.node));
-        if (await emitPosts(t, firstPosts, method, { ordered: true, followers })) return;
-        await paginate(t, firstCursor(user), (c) => ep.timelinePage(user, c, session), (d, m) => emitPosts(t, d.posts, m, { ordered: true, followers }));
+        if (await emitPosts(t, loaded.posts, method, { ordered: true, followers })) return;
+        await paginate(t, loaded.cursor, (c) => ep.timelinePage(user, c, session), (d, m) => emitPosts(t, d.posts, m, { ordered: true, followers }));
     } else if (opts.resultsType === 'reels') {
         let clipsFailed = false;
         await paginate(t, 'start', async (c) => {
@@ -286,9 +340,8 @@ async function handleProfile(t, session) {
         if (clipsFailed && !full(t)) { // fallback: reels from the main feed
             t.rec.reelsSource = 'filtered from profile posts (reels tab unavailable)';
             const isReel = (p) => p.productType === 'clips';
-            const firstPosts = (tc?.edges ?? []).map((e) => postFromGraph(e.node));
-            if (await emitPosts(t, firstPosts, method, { ordered: true, followers, filter: isReel })) return;
-            await paginate(t, firstCursor(user), (c) => ep.timelinePage(user, c, session), (d, m) => emitPosts(t, d.posts, m, { ordered: true, followers, filter: isReel }));
+            if (await emitPosts(t, loaded.posts, method, { ordered: true, followers, filter: isReel })) return;
+            await paginate(t, loaded.cursor, (c) => ep.timelinePage(user, c, session), (d, m) => emitPosts(t, d.posts, m, { ordered: true, followers, filter: isReel }));
         }
     } else if (opts.resultsType === 'mentions') {
         await paginate(t, { first: true }, (c) => ep.taggedPage(user, c.first ? null : c, session), (d, m) => emitPosts(t, d.posts, m, { ordered: true }));
@@ -429,8 +482,12 @@ async function processTarget(t) {
         else if (t.kind === 'location') await handlePlace(t, session);
         if (t.rec.status === 'pending') {
             t.rec.status = t.rec.saved ? 'ok' : 'no_results';
-            if (!t.rec.saved && !t.rec.repliesSaved && /^every method failed/.test(t.rec.paginationStoppedBy ?? '')) {
+            if (!t.rec.saved && !t.rec.repliesSaved && /^Instagram requires a login/.test(t.rec.paginationStoppedBy ?? '')) {
+                await saveFailed(t, 'login_required', t.rec.paginationStoppedBy.slice(0, 600), loginHint());
+            } else if (!t.rec.saved && !t.rec.repliesSaved && /^every method failed/.test(t.rec.paginationStoppedBy ?? '')) {
                 await saveFailed(t, 'blocked', t.rec.paginationStoppedBy.slice(0, 600), blockedHint({ message: t.rec.paginationStoppedBy }));
+            } else if (!t.rec.saved && Object.keys(t.rec.skipped).length === 1 && t.rec.skipped.duplicate_in_run) {
+                await saveFailed(t, 'duplicate_input', `same ${t.kind === 'post' ? 'post' : 'account'} as another input in this run${t.rec.resolvedTo ? ` (${t.rec.resolvedTo})` : ''}`, 'Already scraped from the other input — its results are in the dataset. Not charged twice.');
             } else if (!t.rec.saved) {
                 const reasons = Object.entries(t.rec.skipped).map(([k, v]) => `${v}× ${k}`).join(', ');
                 await saveFailed(t, 'no_results', reasons ? `nothing passed the filters (${reasons})` : (t.rec.paginationStoppedBy ?? 'Instagram returned no items'),
@@ -443,6 +500,10 @@ async function processTarget(t) {
             return;
         }
         if (err instanceof NotFoundError) return saveFailed(t, 'not_found', err.message);
+        if (err instanceof LoginWallError) {
+            log.warning(`${t.inputUrl}: ${err.message}`);
+            return saveFailed(t, 'login_required', err.message.slice(0, 600), loginHint());
+        }
         if (err instanceof BlockedError) {
             log.warning(`${t.inputUrl}: ${err.message}`);
             return saveFailed(t, 'blocked', err.message.slice(0, 600), blockedHint(err));
@@ -500,7 +561,7 @@ if (!opts.directUrls.length && opts.search.length) {
             }
         } catch (err) {
             if (err instanceof StoppedError) break;
-            await saveFailed({ inputUrl: rec.inputUrl, rec, searchTerm: term }, 'blocked', `search failed: ${err.message.slice(0, 400)}`, blockedHint(err));
+            await saveFailed({ inputUrl: rec.inputUrl, rec, searchTerm: term }, err instanceof LoginWallError ? 'login_required' : 'blocked', `search failed: ${err.message.slice(0, 400)}`, err instanceof LoginWallError ? loginHint() : blockedHint(err));
         }
     }
 }
@@ -509,6 +570,9 @@ if (!targets.length && !summary.failedRowsSaved) log.warning('Nothing to scrape:
 log.info(`Scraping ${targets.length} input(s), up to ${opts.resultsLimit} ${opts.resultsType} each, ${Math.min(CONCURRENCY, targets.length || 1)} in parallel.`);
 
 const queue = [...targets];
+// The first input runs alone so the run learns which Instagram methods work (and which are login-walled)
+// before 25 inputs hit them in parallel — avoids paying for the same dead end many times.
+if (queue.length && !stopReason) await processTarget(queue.shift());
 await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
     while (queue.length && !stopReason && msLeft() > 0) await processTarget(queue.shift());
 }));

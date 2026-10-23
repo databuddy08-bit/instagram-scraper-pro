@@ -18,7 +18,7 @@ async function run(name, input, { mock, env = {}, proxy = true, storage } = {}) 
     const child = spawn('node', ['src/main.js'], {
         cwd: ROOT,
         env: { ...process.env, HTTPS_PROXY: '', HTTP_PROXY: '', https_proxy: '', http_proxy: '', CRAWLEE_STORAGE_DIR: dir, APIFY_LOCAL_STORAGE_DIR: dir,
-            CRAWLEE_PURGE_ON_START: '0', IG_BASE: mock.base, DDG_BASE: mock.base, ACTOR_TEST_PAY_PER_EVENT: 'true', ACTOR_USE_CHARGING_LOG_DATASET: 'true',
+            CRAWLEE_PURGE_ON_START: '0', IG_BASE: mock.base, IG_API_BASE: mock.base.replace('127.0.0.1', 'localhost'), DDG_BASE: mock.base, ACTOR_TEST_PAY_PER_EVENT: 'true', ACTOR_USE_CHARGING_LOG_DATASET: 'true',
             APIFY_ACTOR_PRICING_INFO: PRICING(), APIFY_CHARGED_ACTOR_EVENT_COUNTS: '{}', ...env },
     });
     let logs = '';
@@ -50,7 +50,7 @@ if (want('posts')) {
     check('run succeeds with 30 posts', r.code === 0 && r.ok.length === 30, `${r.secs}s`);
     check('no duplicate posts', new Set(r.ok.map((x) => x.id)).size === r.ok.length);
     check('every post billed once as instagram-item, failed rows free', billed(r) && r.charges.every((c) => c.eventName === 'instagram-item'));
-    check('fell back to mobile feed after GraphQL kept failing', d['posts:v1_feed_user(mobile)']?.successes >= 1 && !d['posts:graphql_timeline']?.successes, JSON.stringify(Object.fromEntries(Object.entries(d).map(([k, v]) => [k, `${v.successes}/${v.attempts}${v.disabled ? ' disabled' : ''}`]))));
+    check('fell back to mobile feed after GraphQL kept failing', (d['posts:v1_feed_user(mobile,www)']?.successes ?? 0) >= 1 && !d['posts:graphql_timeline']?.successes, JSON.stringify(Object.fromEntries(Object.entries(d).map(([k, v]) => [k, `${v.successes}/${v.attempts}${v.disabled ? ' disabled' : ''}`]))));
     check('engagement rate computed from owner followers', r.ok.filter((x) => x.likesCount !== null).every((x) => typeof x.engagementRate === 'number'));
     check('hashtags and mentions parsed from captions', r.ok.every((x) => x.hashtags.includes('travel') && x.mentions.includes('natgeo')));
     check('carousels have child items, reels have play counts', r.ok.filter((x) => x.type === 'Sidecar').every((x) => x.childPosts.length === 3) && r.ok.filter((x) => x.isReel).every((x) => x.videoPlayCount > 0));
@@ -171,6 +171,30 @@ if (want('limits')) {
     const b = await run('blocked', { directUrls: ['natgeo', 'brand_co'], resultsType: 'details' }, { mock: down, proxy: false });
     down.close();
     check('all blocked without proxy: blocked rows tell the user to use RESIDENTIAL, nothing charged', b.code === 0 && b.failed.length === 2 && b.failed.every((x) => x.status === 'blocked' && /RESIDENTIAL/.test(x.fixHint)) && b.chargeCount === 0, `${b.secs}s`);
+}
+
+if (want('reality')) {
+    console.log('\n=== 12. REALITY (Instagram as measured Oct 2026: profile/comments/hashtags/places/mentions/search login-walled; feed + reels work, rate-limited) ===');
+    const walls = ['web_profile_info', 'v1_comments', 'graphql_doc', 'graphql_comments', 'graphql_hash_post', 'tags_web_info', 'tag_sections', 'locations_web_info',
+        'location_sections', 'usertags', 'graphql_tagged', 'topsearch', 'profile_html', 'graphql_timeline', 'user_info', 'media_info'];
+    const real = await startMock({ blockRate: 0.35, loginWalled: walls });
+    const posts = await run('real-posts', { directUrls: ['natgeo', 'https://www.instagram.com/nasawebb/'], resultsType: 'posts', resultsLimit: 30 }, { mock: real });
+    check('posts: 60 saved via the posts feed despite the login-walled profile endpoint', posts.ok.length === 60 && billed(posts), `${posts.secs}s, ${posts.summary.requests.requests} requests`);
+    check('profile endpoint given up quickly (login wall detected, not retried on every IP)', (posts.diag.methods['profile:web_profile_info(web,www)']?.attempts ?? 0) <= 3, JSON.stringify(Object.fromEntries(Object.entries(posts.diag.methods).map(([k, v]) => [k, `${v.successes}/${v.attempts} walls:${v.loginWall}`]))));
+    check('pinned only when pinned by the owner (co-author pin ignored)', posts.ok.filter((x) => x.isPinned).every((x) => x.shortCode === real.shortcode(x.ownerUsername, 0)));
+    const det = await run('real-details', { directUrls: ['natgeo', 'brand_co', 'https://www.instagram.com/549313808/', 'nobody_here_404'], resultsType: 'details' }, { mock: real });
+    const ng = det.ok.find((x) => x.username === 'natgeo');
+    check('details: partial profiles from the feed, missing fields listed, never guessed', det.ok.length === 3 && ng?.dataCompleteness === 'partial' && ng.missingFields.includes('biography') && ng.latestPosts.length === 12 && ng.followersCount === null, ng?.missingReason);
+    check('profile ID resolved through the feed', det.ok.some((x) => x.username === 'nasawebb'));
+    check('unknown account -> not_found', det.failed.some((x) => x.status === 'not_found'));
+    const reels = await run('real-reels', { directUrls: ['nasawebb'], resultsType: 'reels', resultsLimit: 10 }, { mock: real });
+    check('reels work via the reels tab', reels.ok.length === 10 && reels.ok.every((x) => x.productType === 'clips'));
+    const sc = real.shortcode('natgeo', 7);
+    const walled = await run('real-walled', { directUrls: Array.from({ length: 12 }, (_, i) => `https://www.instagram.com/p/${real.shortcode('natgeo', 20 + i)}/`), resultsType: 'comments', resultsLimit: 20 }, { mock: real });
+    void sc;
+    check('comments behind the login wall -> login_required rows, free, with an honest hint', walled.failed.length === 12 && walled.failed.every((x) => x.status === 'login_required' && /require a logged-in/.test(x.fixHint)) && walled.chargeCount === 0, walled.failed[0]?.status);
+    check('walled methods disabled after 2 walls — 12 inputs cost under 4 requests each', walled.summary.requests.requests <= 45, `${walled.summary.requests.requests} requests for 12 inputs`);
+    real.close();
 }
 
 mock.close();

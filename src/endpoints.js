@@ -14,21 +14,26 @@ const HASH = {
     post: 'b3055c01b4b222b8a47dc12b090e4e64',
 };
 
-/** A v1 max_id can't be used by GraphQL methods (and vice versa); restarting with the other method is allowed only from a GraphQL cursor. */
+/**
+ * Orders fallback methods for a pagination cursor. Methods whose own cursor key is present continue the page;
+ * from a GraphQL-only cursor the others may restart from the top (duplicates are skipped); a v1 cursor never restarts.
+ */
 const onlyCompatible = (cursor, methods) => {
-    if (cursor?.v1 && !cursor.graph) return methods.filter((m) => !m.name.includes('graphql'));
-    if (cursor?.graph) return [...methods.filter((m) => m.name.includes('graphql')), ...methods.filter((m) => !m.name.includes('graphql'))];
-    return methods;
+    if (!cursor || cursor.first) return methods;
+    const can = methods.filter((m) => m.key && cursor[m.key]);
+    const restart = cursor.v1 ? [] : methods.filter((m) => !(m.key && cursor[m.key]));
+    return [...can, ...restart];
 };
 
 export function makeEndpoints(client) {
     const req = (o) => client.request(o).then(check);
 
     // ---------- Profiles ----------
-    const profileByUsername = (username, session) => client.run(['web', 'mobile'].flatMap((style) => [WWW, API].map((base) => ({
+    // Full profile (followers, bio, contacts). Instagram often login-walls this for logged-out visitors.
+    const profileInfo = (username, session) => client.run(['web', 'mobile'].flatMap((style) => [WWW, API].map((base) => ({
         name: `profile:web_profile_info(${style},${base === WWW ? 'www' : 'i'})`,
         notFoundIsFinal: true,
-        attempts: client.useProxy ? 2 : 1,
+        attempts: 1,
         fn: async (s) => {
             const r = await req({ url: `${base}/api/v1/users/web_profile_info/?username=${enc(username)}`, style, session: s, referer: `https://www.instagram.com/${username}/`, name: 'profile_web_profile_info' });
             if (!r.json?.data || !('user' in r.json.data)) throw new ShapeError('no data.user in response');
@@ -37,35 +42,53 @@ export function makeEndpoints(client) {
         },
     }))), session);
 
-    const usernameById = (id, session) => client.run([
-        {
-            name: 'profile:v1_user_info(mobile)',
-            notFoundIsFinal: true,
-            fn: async (s) => {
-                const r = await req({ url: `${API}/api/v1/users/${id}/info/`, style: 'mobile', session: s, name: 'profile_v1_user_info' });
-                const u = r.json?.user;
-                if (!u?.username) throw new ShapeError('no user.username');
-                return u.username;
-            },
+    // Counts and bio from the public profile page's meta tags (works when the page is served to logged-out visitors).
+    const profileMeta = (username, session) => client.run([{
+        name: 'profile:page_meta',
+        attempts: 2,
+        fn: async (s) => {
+            const r = await req({ url: `${WWW}/${enc(username)}/`, style: 'html', expect: 'html', session: s, name: 'profile_page_meta' });
+            return metaFromProfileHtml(r.body) ?? (() => { throw new ShapeError('no profile meta tags'); })();
         },
-        {
-            name: 'profile:graphql_user_by_id',
-            fn: async (s) => {
-                const r = await req({ url: `${WWW}/graphql/query/?query_hash=${HASH.timeline}&variables=${vars({ id, first: 1 })}`, session: s, name: 'profile_graphql_by_id' });
-                const u = r.json?.data?.user;
-                if (u === null) throw new NotFoundError('no account with this ID');
-                const owner = u?.edge_owner_to_timeline_media?.edges?.[0]?.node?.owner?.username;
-                if (!owner) throw new ShapeError('ID resolved but account has no posts to read the username from');
-                return owner;
-            },
-        },
-    ], session);
+    }], session);
 
-    // ---------- Profile posts (pagination after the first 12) ----------
+    // Posts feed — verified working logged-out (mobile app style on www.instagram.com, Oct 2026).
+    const feedParse = (r, fallbackUsername) => {
+        if (!Array.isArray(r.json?.items)) throw new ShapeError('no items');
+        const items = r.json.items;
+        const top = r.json.user ?? items[0]?.user ?? null;
+        const user = top ? {
+            id: String(top.pk ?? top.id ?? ''), username: top.username ?? items[0]?.user?.username ?? fallbackUsername ?? null, full_name: top.full_name ?? null,
+            is_private: Boolean(top.is_private), is_verified: Boolean(top.is_verified), profile_pic_url: top.profile_pic_url ?? null,
+        } : null;
+        return { user, posts: items.map(postFromV1), next: r.json.more_available && r.json.next_max_id ? { v1: r.json.next_max_id } : null };
+    };
+    const host = (b) => (b === WWW ? 'www' : 'i');
+    const feedByUsername = (username, cursor, session) => client.run([WWW, API].map((base) => ({
+        name: `posts:v1_feed_username(mobile,${host(base)})`,
+        key: 'v1',
+        notFoundIsFinal: base === WWW,
+        fn: async (s) => feedParse(await req({ url: `${base}/api/v1/feed/user/${enc(username)}/username/?count=12${cursor?.v1 ? `&max_id=${enc(cursor.v1)}` : ''}`, style: 'mobile', session: s, referer: `https://www.instagram.com/${username}/`, name: 'feed_username' }), username),
+    })), session);
+    const feedById = (id, cursor, session) => client.run([WWW, API].map((base) => ({
+        name: `posts:v1_feed_user(mobile,${host(base)})`,
+        key: 'v1',
+        notFoundIsFinal: base === WWW,
+        fn: async (s) => feedParse(await req({ url: `${base}/api/v1/feed/user/${id}/?count=12${cursor?.v1 ? `&max_id=${enc(cursor.v1)}` : ''}`, style: 'mobile', session: s, name: 'feed_user' })),
+    })), session);
+
+    // ---------- Profile posts (pagination) ----------
     const timelinePage = (user, cursor, session) => client.run(onlyCompatible(cursor, [
+        ...[WWW, API].map((base) => ({
+            name: `posts:v1_feed_user(mobile,${host(base)})`,
+            key: 'v1',
+            fn: async (s) => feedParse(await req({ url: `${base}/api/v1/feed/user/${user.id}/?count=12${cursor?.v1 ? `&max_id=${enc(cursor.v1)}` : ''}`, style: 'mobile', session: s, name: 'feed_user' })),
+        })),
         {
             name: 'posts:graphql_timeline',
+            key: 'graph',
             fn: async (s) => {
+                await client.warm(s);
                 const r = await req({ url: `${WWW}/graphql/query/?query_hash=${HASH.timeline}&variables=${vars({ id: user.id, first: 12, after: cursor?.graph ?? undefined })}`, session: s, referer: `https://www.instagram.com/${user.username}/`, name: 'posts_graphql_timeline' });
                 const c = r.json?.data?.user?.edge_owner_to_timeline_media;
                 if (!c) throw new ShapeError('no edge_owner_to_timeline_media');
@@ -73,44 +96,28 @@ export function makeEndpoints(client) {
                 return { posts: c.edges.map((e) => postFromGraph(e.node)), next: c.page_info?.has_next_page ? { graph: c.page_info.end_cursor, v1: last ? `${last}_${user.id}` : undefined } : null };
             },
         },
-        {
-            name: 'posts:v1_feed_user(mobile)',
-            fn: async (s) => {
-                const r = await req({ url: `${API}/api/v1/feed/user/${user.id}/?count=12${cursor?.v1 ? `&max_id=${enc(cursor.v1)}` : ''}`, style: 'mobile', session: s, name: 'posts_v1_feed_user' });
-                if (!Array.isArray(r.json?.items)) throw new ShapeError('no items');
-                return { posts: r.json.items.map(postFromV1), next: r.json.more_available && r.json.next_max_id ? { v1: r.json.next_max_id } : null };
-            },
-        },
-        {
-            name: 'posts:v1_feed_username(web)',
-            fn: async (s) => {
-                const r = await req({ url: `${WWW}/api/v1/feed/user/${enc(user.username)}/username/?count=12${cursor?.v1 ? `&max_id=${enc(cursor.v1)}` : ''}`, session: s, referer: `https://www.instagram.com/${user.username}/`, name: 'posts_v1_feed_username' });
-                if (!Array.isArray(r.json?.items)) throw new ShapeError('no items');
-                return { posts: r.json.items.map(postFromV1), next: r.json.more_available && r.json.next_max_id ? { v1: r.json.next_max_id } : null };
-            },
-        },
     ]), session);
 
-    // ---------- Reels tab ----------
-    const reelsPage = (user, cursor, session) => client.run([
-        {
-            name: 'reels:v1_clips_user',
-            fn: async (s) => {
-                const form = { target_user_id: user.id, page_size: '12', include_feed_video: 'true' };
-                if (cursor) form.max_id = cursor;
-                const r = await req({ method: 'POST', url: `${WWW}/api/v1/clips/user/`, form, session: s, referer: `https://www.instagram.com/${user.username}/reels/`, name: 'reels_v1_clips_user' });
-                if (!Array.isArray(r.json?.items)) throw new ShapeError('no items');
-                const p = r.json.paging_info ?? {};
-                return { posts: r.json.items.map((it) => postFromV1(it.media ?? it)), next: p.more_available && p.max_id ? p.max_id : null };
-            },
+    // ---------- Reels tab (verified working logged-out in the mobile style) ----------
+    const reelsPage = (user, cursor, session) => client.run(['mobile', 'web'].map((style) => ({
+        name: `reels:v1_clips_user(${style})`,
+        fn: async (s) => {
+            const form = { target_user_id: user.id, page_size: '12', include_feed_video: 'true' };
+            if (cursor) form.max_id = cursor;
+            const r = await req({ method: 'POST', url: `${WWW}/api/v1/clips/user/`, form, style, session: s, referer: `https://www.instagram.com/${user.username}/reels/`, name: 'reels_v1_clips_user' });
+            if (!Array.isArray(r.json?.items)) throw new ShapeError('no items');
+            const p = r.json.paging_info ?? {};
+            return { posts: r.json.items.map((it) => postFromV1(it.media ?? it)), next: p.more_available && p.max_id ? p.max_id : null };
         },
-    ], session);
+    })), session);
 
     // ---------- Tagged posts (mentions) ----------
     const taggedPage = (user, cursor, session) => client.run(onlyCompatible(cursor, [
         {
             name: 'mentions:graphql_tagged',
+            key: 'graph',
             fn: async (s) => {
+                await client.warm(s);
                 const r = await req({ url: `${WWW}/graphql/query/?query_hash=${HASH.tagged}&variables=${vars({ id: user.id, first: 12, after: cursor?.graph ?? undefined })}`, session: s, referer: `https://www.instagram.com/${user.username}/tagged/`, name: 'mentions_graphql_tagged' });
                 const c = r.json?.data?.user?.edge_user_to_photos_of_you;
                 if (!c) throw new ShapeError('no edge_user_to_photos_of_you');
@@ -119,8 +126,9 @@ export function makeEndpoints(client) {
         },
         {
             name: 'mentions:v1_usertags(mobile)',
+            key: 'v1',
             fn: async (s) => {
-                const r = await req({ url: `${API}/api/v1/usertags/${user.id}/feed/?count=12${cursor?.v1 ? `&max_id=${enc(cursor.v1)}` : ''}`, style: 'mobile', session: s, name: 'mentions_v1_usertags' });
+                const r = await req({ url: `${WWW}/api/v1/usertags/${user.id}/feed/?count=12${cursor?.v1 ? `&max_id=${enc(cursor.v1)}` : ''}`, style: 'mobile', session: s, name: 'mentions_v1_usertags' });
                 if (!Array.isArray(r.json?.items)) throw new ShapeError('no items');
                 return { posts: r.json.items.map(postFromV1), next: r.json.more_available && r.json.next_max_id ? { v1: r.json.next_max_id } : null };
             },
@@ -139,15 +147,16 @@ export function makeEndpoints(client) {
         {
             name: 'post:graphql_doc(POST)',
             notFoundIsFinal: true,
-            fn: async (s) => xdt(await req({ method: 'POST', url: `${WWW}/graphql/query`, form: { variables: JSON.stringify(graphPostVars(sc)), doc_id: POST_DOC_ID }, session: s, referer: `https://www.instagram.com/p/${sc}/`, name: 'post_graphql_doc_post' })),
+            fn: async (s) => { await client.warm(s); return xdt(await req({ method: 'POST', url: `${WWW}/graphql/query`, form: { variables: JSON.stringify(graphPostVars(sc)), doc_id: POST_DOC_ID }, session: s, referer: `https://www.instagram.com/p/${sc}/`, name: 'post_graphql_doc_post' })); },
         },
         {
             name: 'post:graphql_doc(GET)',
-            fn: async (s) => xdt(await req({ url: `${WWW}/graphql/query/?doc_id=${POST_DOC_ID}&variables=${vars(graphPostVars(sc))}`, session: s, referer: `https://www.instagram.com/p/${sc}/`, name: 'post_graphql_doc_get' })),
+            fn: async (s) => { await client.warm(s); return xdt(await req({ url: `${WWW}/graphql/query/?doc_id=${POST_DOC_ID}&variables=${vars(graphPostVars(sc))}`, session: s, referer: `https://www.instagram.com/p/${sc}/`, name: 'post_graphql_doc_get' })); },
         },
         {
             name: 'post:graphql_hash',
             fn: async (s) => {
+                await client.warm(s);
                 const r = await req({ url: `${WWW}/graphql/query/?query_hash=${HASH.post}&variables=${vars({ shortcode: sc })}`, session: s, name: 'post_graphql_hash' });
                 const m = r.json?.data?.shortcode_media;
                 if (m === null) throw new NotFoundError('post not found');
@@ -168,6 +177,7 @@ export function makeEndpoints(client) {
             name: 'post:embed_page',
             fn: async (s) => {
                 const r = await req({ url: `${WWW}/p/${sc}/embed/captioned/`, style: 'html', expect: 'html', session: s, name: 'post_embed' });
+                if (/"pageID":"httpErrorPage"|PolarisErrorRoute/.test(r.body)) throw new ShapeError('embed page returned Instagram\'s "not available" page');
                 return embedToMedia(r.body, sc);
             },
         },
@@ -177,6 +187,7 @@ export function makeEndpoints(client) {
     const commentsPage = (sc, cursor, { newest }, session) => client.run(onlyCompatible(cursor, [
         {
             name: 'comments:v1_media_comments',
+            key: 'v1',
             fn: async (s) => {
                 const q = new URLSearchParams({ can_support_threading: 'true', permalink_enabled: 'false' });
                 if (newest) q.set('sort_order', 'newest');
@@ -189,7 +200,9 @@ export function makeEndpoints(client) {
         },
         {
             name: 'comments:graphql_hash',
+            key: 'graph',
             fn: async (s) => {
+                await client.warm(s);
                 const r = await req({ url: `${WWW}/graphql/query/?query_hash=${HASH.comments}&variables=${vars({ shortcode: sc, first: 50, after: cursor?.graph ?? undefined })}`, session: s, name: 'comments_graphql' });
                 const c = r.json?.data?.shortcode_media?.edge_media_to_parent_comment;
                 if (!c) throw new ShapeError('no edge_media_to_parent_comment');
@@ -336,7 +349,29 @@ export function makeEndpoints(client) {
         },
     ], session);
 
-    return { profileByUsername, usernameById, timelinePage, reelsPage, taggedPage, postByShortcode, commentsPage, childCommentsPage, hashtagInfo, sectionsPage, placeInfo, search, resolveShare };
+    return { profileInfo, profileMeta, feedByUsername, feedById, timelinePage, reelsPage, taggedPage, postByShortcode, commentsPage, childCommentsPage, hashtagInfo, sectionsPage, placeInfo, search, resolveShare };
+}
+
+const parseCount = (x) => {
+    const m = String(x ?? '').replace(/,/g, '').match(/^([\d.]+)\s*([KMB])?$/i);
+    if (!m) return null;
+    return Math.round(Number(m[1]) * ({ K: 1e3, M: 1e6, B: 1e9 }[(m[2] ?? '').toUpperCase()] ?? 1));
+};
+
+/** og:description looks like "283M Followers, 160 Following, 32K Posts - See Instagram photos and videos from National Geographic (@natgeo)". */
+export function metaFromProfileHtml(html) {
+    const meta = (p) => html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${p}["'][^>]+content=["']([^"']*)["']`, 'i'))?.[1]
+        ?? html.match(new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:property|name)=["']${p}["']`, 'i'))?.[1];
+    const d = (meta('og:description') ?? meta('description') ?? '').replace(/&#x2c;|&#44;/g, ',').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'");
+    const m = d.match(/([\d.,]+[KMB]?)\s+Followers?,\s*([\d.,]+[KMB]?)\s+Following,\s*([\d.,]+[KMB]?)\s+Posts?/i);
+    if (!m) return null;
+    const exact = (v) => !/[KMB]$/i.test(v);
+    const name = (meta('og:title') ?? '').match(/^(.*?)\s*\(@[a-z0-9._]+\)/i)?.[1]?.trim() ?? null;
+    const bio = d.split(/ on Instagram:\s*"/i)[1]?.replace(/"\s*$/, '') ?? null;
+    return {
+        followers: parseCount(m[1]), following: parseCount(m[2]), posts: parseCount(m[3]),
+        approximate: !(exact(m[1]) && exact(m[2]) && exact(m[3])), fullName: name, bio, source: `profile page meta: "${d.slice(0, 90)}"`,
+    };
 }
 
 /** Embed page -> media object. Uses the embedded JSON when present, otherwise reads the visible HTML (partial data). */

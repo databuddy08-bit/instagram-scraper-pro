@@ -152,12 +152,16 @@ export function postFromV1(item) {
     }));
     const comments = (m.preview_comments ?? m.comments ?? []).map((c) => commentFromV1(c, sc)).filter(Boolean);
     const u = m.user ?? m.owner ?? {};
-    const musicAsset = m.clips_metadata?.music_info?.music_asset_info;
-    const orig = m.clips_metadata?.original_sound_info;
+    const musicAsset = m.clips_metadata?.music_info?.music_asset_info ?? m.music_metadata?.music_info?.music_asset_info;
+    const orig = m.clips_metadata?.original_sound_info ?? m.music_metadata?.original_sound_info;
     const music = musicAsset
         ? { artist_name: musicAsset.display_artist ?? null, song_name: musicAsset.title ?? null, uses_original_audio: false, audio_id: musicAsset.audio_asset_id ? String(musicAsset.audio_asset_id) : null }
         : orig ? { artist_name: orig.ig_artist?.username ?? null, song_name: orig.original_audio_title ?? null, uses_original_audio: true, audio_id: orig.audio_asset_id ? String(orig.audio_asset_id) : null } : null;
-    const pinned = (m.timeline_pinned_user_ids ?? []).length > 0 || (m.clips_tab_pinned_user_ids ?? []).length > 0;
+    // Pinned only when pinned by this post's owner (co-authors can pin a shared post on their own profile).
+    const ownerPk = String((m.user ?? m.owner ?? {}).pk ?? (m.user ?? m.owner ?? {}).id ?? '');
+    const pinnedBy = [...(m.timeline_pinned_user_ids ?? []), ...(m.clips_tab_pinned_user_ids ?? [])].map(String);
+    const pinned = ownerPk ? pinnedBy.includes(ownerPk) : pinnedBy.length > 0;
+    const loc = m.location ?? (Array.isArray(m.locations) ? m.locations[0] : null);
     return finishPost({
         id,
         type: m.media_type === 8 ? 'Sidecar' : m.media_type === 2 ? 'Video' : 'Image',
@@ -168,7 +172,7 @@ export function postFromV1(item) {
         latestComments: comments.slice(0, 15).map(shortComment),
         dimensionsHeight: m.original_height ?? null,
         dimensionsWidth: m.original_width ?? null,
-        displayUrl: v1Image(m) ?? v1Image(m.carousel_media?.[0]),
+        displayUrl: v1Image(m) ?? v1Image(m.carousel_media?.[0]) ?? m.display_uri ?? null,
         images: carousel.filter((c) => c.type === 'Image').map((c) => c.displayUrl),
         videoUrl: m.video_versions?.[0]?.url ?? null,
         alt: m.accessibility_caption ?? null,
@@ -188,9 +192,9 @@ export function postFromV1(item) {
         isCommentsDisabled: typeof m.comments_disabled === 'boolean' ? m.comments_disabled : null,
         isSponsored: typeof m.is_paid_partnership === 'boolean' ? m.is_paid_partnership : null,
         taggedUsers: (m.usertags?.in ?? []).map((t) => t.user?.username).filter(Boolean),
-        coauthorProducers: (m.coauthor_producers ?? []).map((x) => x.username).filter(Boolean),
-        locationName: m.location?.name ?? null,
-        locationId: m.location?.pk ? String(m.location.pk) : null,
+        coauthorProducers: (m.coauthor_producers ?? []).map((x) => x.username).filter((x) => x && x !== u.username),
+        locationName: loc?.name ?? null,
+        locationId: loc?.pk ? String(loc.pk) : (loc?.id ? String(loc.id) : null),
         musicInfo: music,
     });
 }
@@ -227,12 +231,16 @@ export function mediaFromTree(tree) {
 
 // ---------- Profiles ----------
 
-export function profileFromUser(u, { latestPostsLimit = 12 } = {}) {
+/**
+ * @param u raw profile (web_profile_info GraphQL user, mobile user info, or the minimal user from the posts feed)
+ * @param o.posts already-normalized latest posts (used when posts came from the feed instead of the profile)
+ */
+export function profileFromUser(u, { latestPostsLimit = 12, posts: givenPosts = null } = {}) {
     if (!u) return null;
     const isGraph = 'edge_followed_by' in u || 'edge_owner_to_timeline_media' in u;
     const bioLinks = (u.bio_links ?? []).map((l) => ({ title: l.title ?? '', url: l.url ?? l.lynx_url ?? null, link_type: l.link_type ?? 'external' })).filter((l) => l.url);
     const followers = isGraph ? num(u.edge_followed_by?.count) : num(u.follower_count);
-    const posts = isGraph ? (u.edge_owner_to_timeline_media?.edges ?? []).map((e) => postFromGraph(e.node)).filter(Boolean) : [];
+    const posts = givenPosts ?? (isGraph ? (u.edge_owner_to_timeline_media?.edges ?? []).map((e) => postFromGraph(e.node)).filter(Boolean) : []);
     const bio = u.biography ?? '';
 
     // contacts with evidence (bio text, link URLs, business contact buttons)

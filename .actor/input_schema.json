@@ -33,7 +33,7 @@
                 "Details (profile, hashtag, place or post info)"
             ],
             "default": "posts",
-            "description": "One content type per run. Profiles → posts, reels, mentions or details. Posts/reels → details or comments. Hashtags and places → posts, reels or details."
+            "description": "One content type per run. Profiles → posts, reels, mentions or details. Posts/reels → details or comments. Hashtags and places → posts, reels or details. Note: Instagram currently shows profile posts and reels to logged-out visitors; comments, mentions, hashtags, places and full profile details are often behind its login wall (those inputs get a free login_required row)."
         },
         "resultsLimit": {
             "title": "Max results per URL",
@@ -134,7 +134,7 @@
             "title": "Show failed inputs in the results",
             "type": "boolean",
             "default": true,
-            "description": "Adds one row per input that returned nothing (status = blocked / not_found / private / no_results / invalid_input) with the reason and how to fix it. Never charged."
+            "description": "Adds one row per input that returned nothing (status = login_required / blocked / not_found / private / no_results / duplicate_input / invalid_input) with the reason and how to fix it. Never charged."
         },
         "skipPreviouslyScraped": {
             "title": "Skip results saved in previous runs",

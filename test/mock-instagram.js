@@ -79,7 +79,7 @@ function v1Item(owner, i, opts) {
         carousel_media: g.edge_sidecar_to_children?.edges.map(({ node }) => ({ pk: node.id, media_type: node.is_video ? 2 : 1, image_versions2: { candidates: [{ url: node.display_url }] } })),
         usertags: { in: g.edge_media_to_tagged_user.edges.map((e) => ({ user: e.node.user })) },
         location: g.location ? { pk: g.location.id, name: g.location.name } : null,
-        timeline_pinned_user_ids: g.pinned_for_users.length ? [Number(g.owner.id)] : [],
+        timeline_pinned_user_ids: g.pinned_for_users.length ? [Number(g.owner.id)] : (i === 6 ? [23947096] : []), // i=6: pinned by a co-author only
         clips_metadata: g.is_video ? { original_sound_info: { ig_artist: { username: owner }, original_audio_title: 'Original audio', audio_asset_id: 1 } } : undefined,
         comments_disabled: false,
     };
@@ -111,7 +111,7 @@ function postOwner(sc) {
  * @param {object} cfg  blockRate: random block share; alwaysBlocked: names of methods that always 401; down: everything blocked
  */
 export function startMock(cfg = {}) {
-    const { blockRate = 0.1, alwaysBlocked = [], delayMs = 0 } = cfg;
+    const { blockRate = 0.1, alwaysBlocked = [], loginWalled = [], delayMs = 0 } = cfg;
     let seed = 99;
     const rand = () => {
         seed = (seed * 1103515245 + 12345) % 2147483648;
@@ -124,9 +124,9 @@ export function startMock(cfg = {}) {
     };
     const blocked = (res) => {
         const k = rand();
+        // Real Instagram rate limits are 401/429 JSON (observed Oct 2026); login redirects mean a login wall, not a rate limit.
         if (k < 0.5) return send(res, 429, { message: 'Please wait a few minutes before you try again.', require_login: true, status: 'fail' });
-        if (k < 0.8) return send(res, 401, { message: 'Please wait a few minutes before you try again.', require_login: true, status: 'fail' });
-        return send(res, 302, '', { location: 'https://www.instagram.com/accounts/login/' });
+        return send(res, 401, { message: 'Please wait a few minutes before you try again.', require_login: true, status: 'fail' });
     };
 
     const server = http.createServer(async (req, res) => {
@@ -147,11 +147,17 @@ export function startMock(cfg = {}) {
                 return 'graphql_doc';
             }
             if (/^\/api\/v1\/feed\/user\/\d+\/$/.test(path)) return 'v1_feed_user';
+            if (/^\/api\/v1\/feed\/user\/[^/]+\/username\/$/.test(path)) return 'v1_feed_username';
+            if (path === '/') return 'homepage';
+            if (path === '/html/') return 'ddg';
+            if (/^\/[a-z0-9._]+\/$/.test(path)) return 'profile_html';
             if (path === '/api/v1/clips/user/') return 'clips_user';
             if (/^\/api\/v1\/usertags\//.test(path)) return 'usertags';
             if (/\/child_comments\//.test(path)) return 'child_comments';
             if (/^\/api\/v1\/media\/\d+\/comments\/$/.test(path)) return 'v1_comments';
             if (/^\/api\/v1\/users\/\d+\/info\/$/.test(path)) return 'user_info';
+            if (/^\/api\/v1\/media\/\d+\/info\/$/.test(path)) return 'media_info';
+            if (/\/embed\/captioned\/$/.test(path)) return 'embed';
             if (path === '/api/v1/tags/web_info/') return 'tags_web_info';
             if (/^\/api\/v1\/tags\/[^/]+\/sections\/$/.test(path)) return 'tag_sections';
             if (path === '/api/v1/locations/web_info/') return 'locations_web_info';
@@ -163,8 +169,13 @@ export function startMock(cfg = {}) {
         })();
         hits.total += 1;
         hits.byPath[method] = (hits.byPath[method] ?? 0) + 1;
-        if (method !== 'ddg' && !req.headers['x-ig-app-id'] && method !== 'share') return send(res, 400, { message: 'useragent mismatch', status: 'fail' });
-        if (alwaysBlocked.includes(method) || (method !== 'ddg' && rand() < blockRate)) return blocked(res);
+        const htmlPage = ['ddg', 'share', 'homepage', 'profile_html', 'embed'].includes(method);
+        if (!htmlPage && !req.headers['x-ig-app-id']) return send(res, 400, { message: 'useragent mismatch', status: 'fail' });
+        if (loginWalled.includes(method)) {
+            if (htmlPage) return send(res, 302, '', { location: 'https://www.instagram.com/accounts/login/?next=x' });
+            return send(res, 403, { message: 'login_required', error_title: "You've Been Logged Out", status: 'fail' });
+        }
+        if (alwaysBlocked.includes(method) || (method !== 'ddg' && method !== 'homepage' && rand() < blockRate)) return blocked(res);
 
         switch (method) {
             case 'web_profile_info': {
@@ -192,15 +203,35 @@ export function startMock(cfg = {}) {
                 const edges = Array.from({ length: Math.max(0, Math.min(v.first, n - start)) }, (_, k) => ({ node: graphNode(owner, start + k) }));
                 return send(res, 200, { data: { user: { edge_owner_to_timeline_media: { count: n, edges, page_info: { has_next_page: start + v.first < n, end_cursor: `g${start + v.first}` } } } } });
             }
+            case 'embed': // Instagram now serves its error app here with HTTP 200 (observed Oct 2026)
+                return send(res, 200, '<html><script>{"pageID":"httpErrorPage"}</script></html>');
+            case 'homepage':
+                return send(res, 200, '<html><script>["LSD",[],{"token":"REALTOKEN123"},323]</script></html>', { 'set-cookie': 'csrftoken=abc123; Path=/' });
+            case 'profile_html': {
+                const name = path.split('/')[1];
+                const u = USERS[name];
+                if (!u) return send(res, 404, '<html>not found</html>');
+                return send(res, 200, `<html><head><meta property="og:title" content="${name.replace(/_/g, ' ')} (@${name}) &#x2022; Instagram photos and videos"><meta property="og:description" content="${(u.followers / 1e6).toFixed(1)}M Followers, 321 Following, ${u.posts} Posts - See Instagram photos and videos from ${name} (@${name})"></head></html>`);
+            }
+            case 'v1_feed_username': {
+                const owner = path.split('/')[5];
+                if (!USERS[owner]) return send(res, 404, { message: 'User not found', status: 'fail' });
+                const u = USERS[owner];
+                const n = u.private ? 0 : u.posts;
+                const items = Array.from({ length: Math.min(12, n) }, (_, k) => v1Item(owner, k));
+                return send(res, 200, { items, num_results: items.length, more_available: n > 12, next_max_id: items.length ? items[items.length - 1].id : null,
+                    user: { pk: u.id, id: u.id, username: owner, full_name: owner.replace(/_/g, ' '), is_private: Boolean(u.private), is_verified: owner === 'natgeo', profile_pic_url: 'https://cdn.example/p.jpg' }, status: 'ok' });
+            }
             case 'v1_feed_user': {
                 const owner = ID_TO_USER[path.split('/')[5]];
+                if (!owner) return send(res, 404, { message: 'User not found', status: 'fail' });
                 const n = USERS[owner].posts;
                 const mx = q.get('max_id');
                 let start = 0;
                 if (/^\d+_\d+$/.test(mx ?? '')) start = Array.from({ length: n }, (_, i) => mediaId(owner, i)).indexOf(mx.split('_')[0]) + 1;
                 else if (mx) start = Number(mx.slice(1));
                 const items = Array.from({ length: Math.max(0, Math.min(12, n - start)) }, (_, k) => v1Item(owner, start + k));
-                return send(res, 200, { items, more_available: start + 12 < n, next_max_id: items.length ? items[items.length - 1].id : null, status: 'ok' });
+                return send(res, 200, { items, more_available: start + 12 < n, next_max_id: items.length ? items[items.length - 1].id : null, user: { pk: USERS[owner].id, id: USERS[owner].id, username: owner, full_name: owner, is_private: Boolean(USERS[owner].private), is_verified: false }, status: 'ok' });
             }
             case 'clips_user': {
                 const owner = ID_TO_USER[form.get('target_user_id')];

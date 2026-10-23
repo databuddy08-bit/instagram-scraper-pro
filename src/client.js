@@ -1,5 +1,6 @@
 // HTTP client: proxy sessions, rate limiting, block detection, fallback strategy chains and per-endpoint diagnostics.
 import { gotScraping } from 'got-scraping';
+import { CookieJar } from 'tough-cookie';
 import { Actor, log } from 'apify';
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
@@ -10,11 +11,13 @@ const MOBILE_UA = 'Instagram 337.0.0.0.77 Android (33/13; 420dpi; 1080x2400; sam
 // Tests point every Instagram host at a local mock server.
 const TEST_BASE = process.env.IG_BASE ?? null;
 export const WWW = TEST_BASE ?? 'https://www.instagram.com';
-export const API = TEST_BASE ?? 'https://i.instagram.com';
+export const API = process.env.IG_API_BASE ?? TEST_BASE ?? 'https://i.instagram.com';
 export const DDG = process.env.DDG_BASE ?? 'https://html.duckduckgo.com';
 
 export class NotFoundError extends Error {}
 export class BlockedError extends Error {}
+/** Instagram answered "login required" for this method (a wall, not a rate limit) — retrying on many IPs is wasted money. */
+export class LoginWallError extends BlockedError {}
 export class StoppedError extends Error {}
 /** The endpoint answered but not in a shape we understand (changed or retired) — try the next method, don't retry. */
 export class ShapeError extends Error {}
@@ -41,6 +44,9 @@ export class Session {
     rotate() {
         this.id = `s${Math.random().toString(36).slice(2, 12)}`;
         this.uses = 0;
+        this.jar = new CookieJar(); // a fresh IP gets fresh cookies, like a new visitor
+        this.lsd = null;
+        this.warmed = false;
     }
 
     used() {
@@ -59,7 +65,7 @@ export class Diagnostics {
     }
 
     get(name) {
-        return (this.methods[name] ??= { attempts: 0, successes: 0, blocked: 0, notFound: 0, shapeErrors: 0, networkErrors: 0, statuses: {}, lastProblem: null, disabled: false });
+        return (this.methods[name] ??= { attempts: 0, successes: 0, blocked: 0, loginWall: 0, notFound: 0, shapeErrors: 0, networkErrors: 0, statuses: {}, lastProblem: null, disabled: false });
     }
 
     record(name, kind, status, problem) {
@@ -67,14 +73,21 @@ export class Diagnostics {
         m.attempts += 1;
         if (status) m.statuses[status] = (m.statuses[status] ?? 0) + 1;
         if (kind === 'blocked') m.blocked += 1;
+        else if (kind === 'loginwall') m.loginWall += 1;
         else if (kind === 'notfound') m.notFound += 1;
         else if (kind === 'shape') m.shapeErrors += 1;
         else if (kind === 'network') m.networkErrors += 1;
         if (problem) m.lastProblem = String(problem).slice(0, 200);
-        if (!m.disabled && m.successes === 0 && m.attempts - m.notFound >= this.disableAfter) {
+        if (!m.disabled && m.successes === 0 && (m.attempts - m.notFound >= this.disableAfter || m.loginWall >= 2)) {
             m.disabled = true;
-            log.warning(`Method "${name}" failed ${m.attempts} times with no success — skipping it for the rest of this run (last: ${m.lastProblem}).`);
+            log.warning(`Method "${name}" ${m.loginWall >= 2 ? 'is behind Instagram\'s login wall' : `failed ${m.attempts} times`} — skipping it for the rest of this run (last: ${m.lastProblem}).`);
         }
+    }
+
+    /** True when every method starting with `prefix` has been tried and none ever worked in this run. */
+    hopeless(prefix) {
+        const ms = Object.entries(this.methods).filter(([k]) => k.startsWith(prefix)).map(([, v]) => v);
+        return ms.length > 0 && ms.every((m) => m.successes === 0 && (m.disabled || m.loginWall + m.blocked >= 3));
     }
 
     success(name) {
@@ -122,6 +135,15 @@ export class Client {
      * One HTTP request, classified. Never throws for HTTP problems.
      * @returns {Promise<{kind:'ok'|'blocked'|'notfound'|'redirect'|'error'|'network', status:number, json:any, body:string, url:string, location?:string, problem?:string}>}
      */
+    /** Loads instagram.com once per session (per IP) like a real visitor: cookies + the page's LSD token for GraphQL calls. */
+    async warm(session) {
+        if (session.warmed) return;
+        session.warmed = true;
+        const r = await this.request({ url: `${WWW}/`, style: 'html', expect: 'html', session, name: 'warmup_homepage' });
+        session.lsd = r.body?.match(/"LSD",\[\],\{"token":"([^"]+)"/)?.[1] ?? r.body?.match(/"lsd":"([^"]+)"/)?.[1] ?? null;
+        this.stats.warmups = (this.stats.warmups ?? 0) + 1;
+    }
+
     async request({ method = 'GET', url, form, style = 'web', session, referer, expect = 'json', name }) {
         await this.limiter.wait();
         this.stats.requests += 1;
@@ -133,8 +155,10 @@ export class Client {
         } else if (style === 'web') {
             Object.assign(headers, {
                 'x-ig-app-id': IG_APP_ID, 'x-asbd-id': '129477', 'x-ig-www-claim': '0', 'x-requested-with': 'XMLHttpRequest',
-                'x-fb-lsd': LSD, accept: '*/*', referer: referer ?? 'https://www.instagram.com/',
+                'x-fb-lsd': session?.lsd ?? LSD, accept: '*/*', referer: referer ?? 'https://www.instagram.com/',
             });
+            const csrf = session?.jar?.getCookiesSync('https://www.instagram.com').find((c) => c.key === 'csrftoken')?.value;
+            if (csrf) headers['x-csrftoken'] = csrf;
             opts.headerGeneratorOptions = { browsers: [{ name: 'chrome', minVersion: 120 }], devices: ['desktop'], operatingSystems: ['windows', 'macos'] };
         } else {
             opts.headerGeneratorOptions = { browsers: [{ name: 'chrome', minVersion: 120 }], devices: ['desktop'], operatingSystems: ['windows', 'macos'] };
@@ -142,7 +166,7 @@ export class Client {
         }
         if (form) {
             headers['content-type'] = 'application/x-www-form-urlencoded';
-            if (style === 'web') form = { lsd: LSD, ...form };
+            if (style === 'web') form = { lsd: session?.lsd ?? LSD, ...form };
         }
         let res;
         try {
@@ -153,6 +177,7 @@ export class Client {
                 headers,
                 ...opts,
                 proxyUrl: this.proxy ? await this.proxy.newUrl(session.id) : undefined,
+                ...(style !== 'mobile' && session?.jar ? { cookieJar: session.jar } : {}),
                 followRedirect: false,
                 throwHttpErrors: false,
                 retry: { limit: 0 },
@@ -174,11 +199,14 @@ export class Client {
         const location = res.headers?.location;
         const msg = json?.message ? `"${String(json.message).slice(0, 90)}"` : '';
         if (status >= 300 && status < 400) {
-            if (LOGIN_RE.test(location ?? '')) return { kind: 'blocked', status, json, body, url, location, problem: `HTTP ${status} redirect to login` };
+            if (LOGIN_RE.test(location ?? '')) return { kind: 'loginwall', status, json, body, url, location, problem: `HTTP ${status} redirect to login page` };
             return { kind: 'redirect', status, json, body, url, location, problem: `HTTP ${status} redirect` };
         }
         if (status === 404) return { kind: 'notfound', status, json, body, url, problem: 'HTTP 404' };
-        if ([401, 403, 429, 999].includes(status) || json?.require_login || json?.spam || /checkpoint_required|login_required|challenge_required/i.test(json?.message ?? '')) {
+        if (/login_required|checkpoint_required/i.test(json?.message ?? '') || (status === 403 && /not-logged-in/.test(body.slice(0, 400)) && expect === 'json')) {
+            return { kind: 'loginwall', status, json, body, url, problem: `HTTP ${status} login required` };
+        }
+        if ([401, 403, 429, 999].includes(status) || json?.require_login || json?.spam || /challenge_required/i.test(json?.message ?? '')) {
             return { kind: 'blocked', status, json, body, url, problem: `HTTP ${status} ${msg}`.trim() };
         }
         if (status >= 500) return { kind: 'error', status, json, body, url, problem: `HTTP ${status}` };
@@ -203,7 +231,7 @@ export class Client {
                 problems.push(`${m.name}: skipped (kept failing earlier in this run)`);
                 continue;
             }
-            const attempts = m.attempts ?? (this.useProxy ? 4 : 2);
+            const attempts = Number(process.env.IG_MAX_ATTEMPTS) || m.attempts || (this.useProxy ? 4 : 2); // IG_MAX_ATTEMPTS: local debugging only
             for (let a = 0; a < attempts; a++) {
                 if (this.shouldStop()) throw new StoppedError('run stopping');
                 let data;
@@ -220,6 +248,14 @@ export class Client {
                         this.diag.record(m.name, 'shape', null, err.message);
                         problems.push(`${m.name}: ${err.message}`);
                         break;
+                    }
+                    if (err instanceof LoginWallError) {
+                        this.diag.record(m.name, 'loginwall', err.status, err.message);
+                        problems.push(`${m.name}: ${err.message}`);
+                        // a login wall isn't an IP problem: keep the session (and its warm-up) instead of paying for a new one
+                        // One retry on a new IP the first time a wall is seen in this run; after that, go straight to the next method.
+                        if (a >= 1 || this.diag.get(m.name).loginWall > 1 || this.diag.get(m.name).disabled) break;
+                        continue;
                     }
                     if (err instanceof BlockedError) {
                         this.diag.record(m.name, err.network ? 'network' : 'blocked', err.status, err.message);
@@ -245,7 +281,9 @@ export class Client {
         const counts = {};
         for (const p of problems) counts[p] = (counts[p] ?? 0) + 1;
         const summary = Object.entries(counts).slice(-6).map(([p, n]) => (n > 1 ? `${n}× ${p}` : p)).join('; ');
-        throw new BlockedError(`every method failed (${summary})`);
+        const walled = problems.length && problems.every((p) => /login (required|page)|login wall|skipped/.test(p));
+        const err = walled ? new LoginWallError(`Instagram requires a login for this (${summary})`) : new BlockedError(`every method failed (${summary})`);
+        throw err;
     }
 }
 
@@ -253,6 +291,11 @@ export class Client {
 export function check(res) {
     if (res.kind === 'ok') return res;
     if (res.kind === 'notfound') throw new NotFoundError(res.problem);
+    if (res.kind === 'loginwall') {
+        const e = new LoginWallError(res.problem);
+        e.status = res.status;
+        throw e;
+    }
     if (res.kind === 'blocked' || res.kind === 'network' || (res.kind === 'error' && !res.fatal)) {
         const e = new BlockedError(res.problem);
         e.status = res.status;

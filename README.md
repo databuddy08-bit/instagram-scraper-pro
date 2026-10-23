@@ -33,6 +33,19 @@ It also adds what plain scrapers leave out:
 | Inputs that fail get a row with `status` and `fixHint`, never charged | ✅ | ❌ |
 | `DIAGNOSTICS` record: which Instagram methods worked in your run | ✅ | ❌ |
 
+## 🔒 What Instagram shows without a login (tested October 2026)
+
+Instagram decides what logged-out visitors may see, and it changes this often. This actor tries several methods per data type and reports exactly what happened.
+
+| Data | Logged-out status | What you get |
+|---|---|---|
+| Profile posts (by username or ID) | ✅ Works | Full post data, paginated |
+| Profile reels tab | ✅ Works | Full reel data with play counts |
+| Profile details | ⚠️ Often login-walled | When walled, a **partial profile** from the public feed: name, ID, verified, private, avg likes/comments, last post and latest 12 posts. `missingFields` lists what Instagram withheld (followers, bio, contacts). Nothing is guessed. |
+| Comments, mentions, single-post details, hashtags, places, search | ⚠️ Usually login-walled | A free `login_required` row explaining it. The actor detects the wall after 2 tries and stops spending proxy traffic on it. |
+
+The first input of every run goes alone, to learn which methods work before scaling to 25 parallel inputs. Every run writes `DIAGNOSTICS` with per-method results.
+
 ## 🔧 Input
 
 **Mode 1: URLs.** Paste one or more URLs and pick **Content to scrape**:
@@ -110,7 +123,7 @@ Every row has a `status` and a `resultType` (`post`, `reel`, `mention`, `comment
 - `topPosts`, `latestPosts`.
 
 **Failed input:**
-- `status`: `blocked`, `not_found`, `private`, `no_results`, `invalid_input` or `unsupported_combination`;
+- `status`: `login_required`, `blocked`, `not_found`, `private`, `no_results`, `duplicate_input`, `invalid_input` or `unsupported_combination`;
 - `error` and `fixHint`.
 
 The dataset has five views: Overview, Posts & reels, Comments, Profiles and Failed inputs.
@@ -135,6 +148,8 @@ Failed inputs, duplicates, items from previous runs and filtered items are **nev
 **Do I need an Instagram account?** No. It reads what Instagram shows logged-out visitors.
 
 **Why do counts differ from what I see in the app?** Logged-out visitors see slightly different numbers, and counts change by the minute. Open the post in a private window and compare it with the run's timestamp.
+
+**Some inputs say `login_required`.** Instagram showed its login wall for that data type, and no method got past it. It isn't charged. Run again later; Instagram opens and closes these walls often.
 
 **Some inputs say `blocked`.** Keep Apify Proxy on **RESIDENTIAL** and run again; new IPs often get through. If it keeps happening, send the `DIAGNOSTICS` record to the developer.
 

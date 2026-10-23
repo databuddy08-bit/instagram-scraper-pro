@@ -7,6 +7,8 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
 export const IG_APP_ID = '936619743392459';
 const LSD = 'AVqbxe3J_YA';
 const MOBILE_UA = 'Instagram 337.0.0.0.77 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 609412000)';
+const IOS_UA = 'Instagram 361.0.0.35.82 (iPhone15,3; iOS 18_1; en_US; en; scale=3.00; 1290x2796; 673486213) AppleWebKit/420+';
+const IOS_APP_ID = '124024574287414';
 
 // Tests point every Instagram host at a local mock server.
 const TEST_BASE = process.env.IG_BASE ?? null;
@@ -68,9 +70,10 @@ export class Diagnostics {
         return (this.methods[name] ??= { attempts: 0, successes: 0, blocked: 0, loginWall: 0, notFound: 0, shapeErrors: 0, networkErrors: 0, statuses: {}, lastProblem: null, disabled: false });
     }
 
-    record(name, kind, status, problem) {
+    record(name, kind, status, problem, routeMayBeAtFault = false) {
         const m = this.get(name);
         m.attempts += 1;
+        if (routeMayBeAtFault) m.routeBlocked = (m.routeBlocked ?? 0) + 1;
         if (status) m.statuses[status] = (m.statuses[status] ?? 0) + 1;
         if (kind === 'blocked') m.blocked += 1;
         else if (kind === 'loginwall') m.loginWall += 1;
@@ -78,7 +81,7 @@ export class Diagnostics {
         else if (kind === 'shape') m.shapeErrors += 1;
         else if (kind === 'network') m.networkErrors += 1;
         if (problem) m.lastProblem = String(problem).slice(0, 200);
-        if (!m.disabled && m.successes === 0 && (m.attempts - m.notFound >= this.disableAfter || m.loginWall >= 2)) {
+        if (!m.disabled && m.successes === 0 && (m.attempts - m.notFound - (m.routeBlocked ?? 0) >= this.disableAfter || m.loginWall >= 2)) {
             m.disabled = true;
             log.warning(`Method "${name}" ${m.loginWall >= 2 ? 'is behind Instagram\'s login wall' : `failed ${m.attempts} times`} — skipping it for the rest of this run (last: ${m.lastProblem}).`);
         }
@@ -113,17 +116,52 @@ export class Diagnostics {
 const LOGIN_RE = /\/accounts\/login|\/challenge\/|\/accounts\/suspended/i;
 
 export class Client {
-    constructor({ proxyConfiguration, msLeft, stats, saveRaw }) {
-        this.proxy = proxyConfiguration;
-        this.useProxy = Boolean(proxyConfiguration);
-        this.limiter = new RateLimiter(this.useProxy ? 400 : 60);
+    /**
+     * @param routes ordered network routes [{label, proxy}] (proxy undefined = the server's own IP).
+     *   When Instagram keeps blocking a route, the client switches to the next one for the rest of the run.
+     */
+    constructor({ routes, msLeft, stats, saveRaw }) {
+        this.routes = routes.map((r) => ({ ...r, ok: 0, fail: 0, streak: 0, limiter: new RateLimiter(r.proxy ? 400 : 40) }));
+        this.routeIdx = 0;
+        this.limiter = { wait: () => this.route.limiter.wait() };
         this.msLeft = msLeft;
         this.stats = stats;
-        this.diag = new Diagnostics({ saveRaw, useProxy: this.useProxy });
+        this.diag = new Diagnostics({ saveRaw, useProxy: true });
     }
 
     shouldStop() {
         return this.msLeft() <= 0;
+    }
+
+    get route() {
+        return this.routes[this.routeIdx];
+    }
+
+    get useProxy() {
+        return Boolean(this.route.proxy);
+    }
+
+    /** Route health: switch to the next route when this one keeps getting blocked and has never (or no longer) worked. */
+    routeResult(idx, ok) {
+        const r = this.routes[idx];
+        if (!r) return;
+        if (ok) {
+            r.ok += 1;
+            r.streak = 0;
+            return;
+        }
+        r.fail += 1;
+        r.streak += 1;
+        const dead = (r.ok === 0 && r.fail >= 5) || r.streak >= 10;
+        if (dead && idx === this.routeIdx && this.routeIdx < this.routes.length - 1) {
+            this.routeIdx += 1;
+            this.stats.routeSwitches = (this.stats.routeSwitches ?? 0) + 1;
+            log.warning(`Instagram keeps blocking "${r.label}" (${r.ok} ok / ${r.fail} blocked). Switching to "${this.route.label}".`);
+        }
+    }
+
+    routesSummary() {
+        return this.routes.map((r, i) => ({ route: r.label, used: i <= this.routeIdx, ok: r.ok, blocked: r.fail, active: i === this.routeIdx }));
     }
 
     async retryDelay(attempt) {
@@ -145,13 +183,17 @@ export class Client {
     }
 
     async request({ method = 'GET', url, form, style = 'web', session, referer, expect = 'json', name }) {
-        await this.limiter.wait();
+        const routeIdx = this.routeIdx;
+        const route = this.routes[routeIdx];
+        await route.limiter.wait();
         this.stats.requests += 1;
         const headers = {};
         const opts = {};
-        if (style === 'mobile') {
+        if (style === 'mobile' || style === 'ios') {
             opts.useHeaderGenerator = false;
-            Object.assign(headers, { 'user-agent': MOBILE_UA, 'x-ig-app-id': IG_APP_ID, accept: '*/*', 'accept-language': 'en-US', 'x-ig-capabilities': '3brTvw==' });
+            Object.assign(headers, style === 'ios'
+                ? { 'user-agent': IOS_UA, 'x-ig-app-id': IOS_APP_ID, accept: '*/*', 'accept-language': 'en-US' }
+                : { 'user-agent': MOBILE_UA, 'x-ig-app-id': IG_APP_ID, accept: '*/*', 'accept-language': 'en-US', 'x-ig-capabilities': '3brTvw==' });
         } else if (style === 'web') {
             Object.assign(headers, {
                 'x-ig-app-id': IG_APP_ID, 'x-asbd-id': '129477', 'x-ig-www-claim': '0', 'x-requested-with': 'XMLHttpRequest',
@@ -176,8 +218,8 @@ export class Client {
                 ...(form ? { body: new URLSearchParams(form).toString() } : {}),
                 headers,
                 ...opts,
-                proxyUrl: this.proxy ? await this.proxy.newUrl(session.id) : undefined,
-                ...(style !== 'mobile' && session?.jar ? { cookieJar: session.jar } : {}),
+                proxyUrl: route.proxy ? await route.proxy.newUrl(session.id) : undefined,
+                ...(!['mobile', 'ios'].includes(style) && session?.jar ? { cookieJar: session.jar } : {}),
                 followRedirect: false,
                 throwHttpErrors: false,
                 retry: { limit: 0 },
@@ -185,17 +227,25 @@ export class Client {
             });
         } catch (err) {
             this.stats.networkErrors += 1;
+            this.routeResult(routeIdx, false);
             return { kind: 'network', status: 0, json: null, body: '', url, problem: `network error ${err.code || err.message}` };
         }
         const status = res.statusCode;
         const body = typeof res.body === 'string' ? res.body : String(res.body ?? '');
+        const out = this.classify(res, status, body, expect, url);
+        if (out.kind === 'ok' || out.kind === 'notfound' || out.kind === 'loginwall') this.routeResult(routeIdx, true);
+        else if (out.kind === 'blocked') this.routeResult(routeIdx, false);
+        if (name) await this.diag.raw(name, url, status, body);
+        return out;
+    }
+
+    classify(res, status, body, expect, url) {
         let json = null;
         if (expect === 'json' || body.trimStart().startsWith('{')) {
             try {
                 json = JSON.parse(body.replace(/^for \(;;\);/, ''));
             } catch { /* not JSON */ }
         }
-        if (name) await this.diag.raw(name, url, status, body);
         const location = res.headers?.location;
         const msg = json?.message ? `"${String(json.message).slice(0, 90)}"` : '';
         if (status >= 300 && status < 400) {
@@ -232,8 +282,10 @@ export class Client {
                 continue;
             }
             const attempts = Number(process.env.IG_MAX_ATTEMPTS) || m.attempts || (this.useProxy ? 4 : 2); // IG_MAX_ATTEMPTS: local debugging only
+            let restarts = 0;
             for (let a = 0; a < attempts; a++) {
                 if (this.shouldStop()) throw new StoppedError('run stopping');
+                const routeAtStart = this.routeIdx;
                 let data;
                 try {
                     data = await m.fn(session);
@@ -258,9 +310,15 @@ export class Client {
                         continue;
                     }
                     if (err instanceof BlockedError) {
-                        this.diag.record(m.name, err.network ? 'network' : 'blocked', err.status, err.message);
+                        this.diag.record(m.name, err.network ? 'network' : 'blocked', err.status, err.message, this.routeIdx < this.routes.length - 1);
                         problems.push(`${m.name}: ${err.message}`);
                         session.rotate();
+                        // The route just switched (the old one is dead): give this method a fresh budget on the new route.
+                        if (this.routeIdx !== routeAtStart && restarts < this.routes.length) {
+                            restarts += 1;
+                            a = -1;
+                            continue;
+                        }
                         if (this.diag.get(m.name).disabled) break;
                         if (a < attempts - 1) await this.retryDelay(a);
                         continue;

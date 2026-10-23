@@ -158,23 +158,24 @@
             "sectionCaption": "Advanced",
             "description": "Saves the first 2 raw Instagram responses per method to the key-value store (RAW_* records). Turn on only when the developer asks for it."
         },
+        "proxyFallback": {
+            "title": "Automatic proxy fallback",
+            "type": "boolean",
+            "default": true,
+            "sectionCaption": "Proxy",
+            "description": "If Instagram keeps blocking the chosen proxy, switch automatically to Apify datacenter proxy and then to the Apify server's own IP. The routes used are listed in RUN_SUMMARY."
+        },
         "proxyConfiguration": {
             "title": "Proxy configuration",
             "type": "object",
             "editor": "proxy",
             "prefill": {
-                "useApifyProxy": true,
-                "apifyProxyGroups": [
-                    "RESIDENTIAL"
-                ]
+                "useApifyProxy": true
             },
             "default": {
-                "useApifyProxy": true,
-                "apifyProxyGroups": [
-                    "RESIDENTIAL"
-                ]
+                "useApifyProxy": true
             },
-            "description": "Instagram blocks datacenter IPs. Keep Apify Proxy with the RESIDENTIAL group."
+            "description": "Apify Proxy (datacenter, the default) works well for posts and reels. Instagram often rate-limits shared residential IPs, so RESIDENTIAL is not always better. With \"Automatic proxy fallback\" on, a blocked proxy is replaced automatically."
         }
     }
 }

@@ -1,6 +1,6 @@
 {
     "name": "instagram-scraper-pro",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Instagram scraper for posts, reels, comments, mentions, profiles, hashtags and places, with search, engagement metrics and per-run diagnostics.",
     "type": "module",
     "main": "src/main.js",

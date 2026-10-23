@@ -30,8 +30,8 @@ export function makeEndpoints(client) {
 
     // ---------- Profiles ----------
     // Full profile (followers, bio, contacts). Instagram often login-walls this for logged-out visitors.
-    const profileInfo = (username, session) => client.run(['web', 'mobile'].flatMap((style) => [WWW, API].map((base) => ({
-        name: `profile:web_profile_info(${style},${base === WWW ? 'www' : 'i'})`,
+    const profileInfo = (username, session) => client.run(['web', 'mobile'].flatMap((style) => [WWW].map((base) => ({
+        name: `profile:web_profile_info(${style})`,
         notFoundIsFinal: true,
         attempts: 1,
         fn: async (s) => {
@@ -63,27 +63,21 @@ export function makeEndpoints(client) {
         } : null;
         return { user, posts: items.map(postFromV1), next: r.json.more_available && r.json.next_max_id ? { v1: r.json.next_max_id } : null };
     };
-    const host = (b) => (b === WWW ? 'www' : 'i');
-    const feedByUsername = (username, cursor, session) => client.run([WWW, API].map((base) => ({
-        name: `posts:v1_feed_username(mobile,${host(base)})`,
+    // Measured Oct 2026: the username feed works logged-out (8/8 from a datacenter IP); the ID feed mostly 401s;
+    // i.instagram.com always answers 403. So: username feed first (Android, then iOS client), ID feed last.
+    const feedUrl = (key, cursor) => `${WWW}/api/v1/feed/user/${enc(key)}/${/^\d+$/.test(String(key)) ? '' : 'username/'}?count=12${cursor?.v1 ? `&max_id=${enc(cursor.v1)}` : ''}`;
+    const feedMethods = (keys, cursor, referer) => keys.flatMap(([label, key]) => ['mobile', 'ios'].map((style) => ({
+        name: `posts:v1_feed_${label}(${style === 'ios' ? 'ios' : 'android'})`,
         key: 'v1',
-        notFoundIsFinal: base === WWW,
-        fn: async (s) => feedParse(await req({ url: `${base}/api/v1/feed/user/${enc(username)}/username/?count=12${cursor?.v1 ? `&max_id=${enc(cursor.v1)}` : ''}`, style: 'mobile', session: s, referer: `https://www.instagram.com/${username}/`, name: 'feed_username' }), username),
-    })), session);
-    const feedById = (id, cursor, session) => client.run([WWW, API].map((base) => ({
-        name: `posts:v1_feed_user(mobile,${host(base)})`,
-        key: 'v1',
-        notFoundIsFinal: base === WWW,
-        fn: async (s) => feedParse(await req({ url: `${base}/api/v1/feed/user/${id}/?count=12${cursor?.v1 ? `&max_id=${enc(cursor.v1)}` : ''}`, style: 'mobile', session: s, name: 'feed_user' })),
-    })), session);
+        notFoundIsFinal: label === 'username' && style === 'mobile',
+        fn: async (s) => feedParse(await req({ url: feedUrl(key, cursor), style, session: s, referer, name: `feed_${label}` }), label === 'username' ? key : undefined),
+    })));
+    const feedByUsername = (username, cursor, session) => client.run(feedMethods([['username', username]], cursor, `https://www.instagram.com/${username}/`), session);
+    const feedById = (id, cursor, session) => client.run(feedMethods([['user', id]], cursor), session);
 
     // ---------- Profile posts (pagination) ----------
     const timelinePage = (user, cursor, session) => client.run(onlyCompatible(cursor, [
-        ...[WWW, API].map((base) => ({
-            name: `posts:v1_feed_user(mobile,${host(base)})`,
-            key: 'v1',
-            fn: async (s) => feedParse(await req({ url: `${base}/api/v1/feed/user/${user.id}/?count=12${cursor?.v1 ? `&max_id=${enc(cursor.v1)}` : ''}`, style: 'mobile', session: s, name: 'feed_user' })),
-        })),
+        ...feedMethods(user.username ? [['username', user.username], ['user', user.id]] : [['user', user.id]], cursor, `https://www.instagram.com/${user.username}/`),
         {
             name: 'posts:graphql_timeline',
             key: 'graph',
@@ -99,8 +93,8 @@ export function makeEndpoints(client) {
     ]), session);
 
     // ---------- Reels tab (verified working logged-out in the mobile style) ----------
-    const reelsPage = (user, cursor, session) => client.run(['mobile', 'web'].map((style) => ({
-        name: `reels:v1_clips_user(${style})`,
+    const reelsPage = (user, cursor, session) => client.run(['mobile', 'ios', 'web'].map((style) => ({
+        name: `reels:v1_clips_user(${style === 'mobile' ? 'android' : style})`,
         fn: async (s) => {
             const form = { target_user_id: user.id, page_size: '12', include_feed_video: 'true' };
             if (cursor) form.max_id = cursor;

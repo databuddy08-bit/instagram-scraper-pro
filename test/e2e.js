@@ -50,7 +50,7 @@ if (want('posts')) {
     check('run succeeds with 30 posts', r.code === 0 && r.ok.length === 30, `${r.secs}s`);
     check('no duplicate posts', new Set(r.ok.map((x) => x.id)).size === r.ok.length);
     check('every post billed once as instagram-item, failed rows free', billed(r) && r.charges.every((c) => c.eventName === 'instagram-item'));
-    check('fell back to mobile feed after GraphQL kept failing', (d['posts:v1_feed_user(mobile,www)']?.successes ?? 0) >= 1 && !d['posts:graphql_timeline']?.successes, JSON.stringify(Object.fromEntries(Object.entries(d).map(([k, v]) => [k, `${v.successes}/${v.attempts}${v.disabled ? ' disabled' : ''}`]))));
+    check('fell back to mobile feed after GraphQL kept failing', (d['posts:v1_feed_username(android)']?.successes ?? 0) >= 1 && !d['posts:graphql_timeline']?.successes, JSON.stringify(Object.fromEntries(Object.entries(d).map(([k, v]) => [k, `${v.successes}/${v.attempts}${v.disabled ? ' disabled' : ''}`]))));
     check('engagement rate computed from owner followers', r.ok.filter((x) => x.likesCount !== null).every((x) => typeof x.engagementRate === 'number'));
     check('hashtags and mentions parsed from captions', r.ok.every((x) => x.hashtags.includes('travel') && x.mentions.includes('natgeo')));
     check('carousels have child items, reels have play counts', r.ok.filter((x) => x.type === 'Sidecar').every((x) => x.childPosts.length === 3) && r.ok.filter((x) => x.isReel).every((x) => x.videoPlayCount > 0));
@@ -180,7 +180,7 @@ if (want('reality')) {
     const real = await startMock({ blockRate: 0.35, loginWalled: walls });
     const posts = await run('real-posts', { directUrls: ['natgeo', 'https://www.instagram.com/nasawebb/'], resultsType: 'posts', resultsLimit: 30 }, { mock: real });
     check('posts: 60 saved via the posts feed despite the login-walled profile endpoint', posts.ok.length === 60 && billed(posts), `${posts.secs}s, ${posts.summary.requests.requests} requests`);
-    check('profile endpoint given up quickly (login wall detected, not retried on every IP)', (posts.diag.methods['profile:web_profile_info(web,www)']?.attempts ?? 0) <= 3, JSON.stringify(Object.fromEntries(Object.entries(posts.diag.methods).map(([k, v]) => [k, `${v.successes}/${v.attempts} walls:${v.loginWall}`]))));
+    check('profile endpoint given up quickly (login wall detected, not retried on every IP)', (posts.diag.methods['profile:web_profile_info(web)']?.attempts ?? 0) <= 3, JSON.stringify(Object.fromEntries(Object.entries(posts.diag.methods).map(([k, v]) => [k, `${v.successes}/${v.attempts} walls:${v.loginWall}`]))));
     check('pinned only when pinned by the owner (co-author pin ignored)', posts.ok.filter((x) => x.isPinned).every((x) => x.shortCode === real.shortcode(x.ownerUsername, 0)));
     const det = await run('real-details', { directUrls: ['natgeo', 'brand_co', 'https://www.instagram.com/549313808/', 'nobody_here_404'], resultsType: 'details' }, { mock: real });
     const ng = det.ok.find((x) => x.username === 'natgeo');
@@ -195,6 +195,20 @@ if (want('reality')) {
     check('comments behind the login wall -> login_required rows, free, with an honest hint', walled.failed.length === 12 && walled.failed.every((x) => x.status === 'login_required' && /require a logged-in/.test(x.fixHint)) && walled.chargeCount === 0, walled.failed[0]?.status);
     check('walled methods disabled after 2 walls — 12 inputs cost under 4 requests each', walled.summary.requests.requests <= 45, `${walled.summary.requests.requests} requests for 12 inputs`);
     real.close();
+}
+
+if (want('fallback')) {
+    console.log('\n=== 13. PROXY FALLBACK (chosen proxy pool fully rate-limited -> next route) ===');
+    const m = await startMock({ blockRate: 0, proxyBlocked: true });
+    const r = await run('fallback', { directUrls: ['natgeo', 'nasawebb'], resultsType: 'posts', resultsLimit: 20 }, { mock: m });
+    m.close();
+    const routes = r.summary.routes ?? [];
+    check('run rescued by switching route: 40 posts saved', r.ok.length === 40 && billed(r), `${r.secs}s`);
+    check('routes recorded in RUN_SUMMARY (proxy blocked, then fallback used)', routes.length >= 2 && routes[0].blocked >= 5 && routes[0].ok === 0 && routes.at(-1).active && routes.at(-1).ok > 0, JSON.stringify(routes));
+    const off = await startMock({ blockRate: 0, proxyBlocked: true });
+    const r2 = await run('fallback-off', { directUrls: ['natgeo'], resultsType: 'posts', resultsLimit: 5, proxyFallback: false }, { mock: off });
+    off.close();
+    check('with fallback off, the blocked proxy is reported (not silently switched)', r2.ok.length === 0 && r2.failed.some((x) => x.status === 'blocked'));
 }
 
 mock.close();

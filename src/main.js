@@ -67,11 +67,10 @@ try {
 }
 const groups = input.proxyConfiguration?.apifyProxyGroups ?? [];
 const proxyLabel = !proxyConfiguration ? 'no proxy' : input.proxyConfiguration?.useApifyProxy ? `Apify proxy (${groups.length ? groups.join(', ') : 'datacenter'})` : 'custom proxy';
-const residential = groups.includes('RESIDENTIAL') || (proxyConfiguration && !input.proxyConfiguration?.useApifyProxy);
 const charging = Actor.getChargingManager();
 const pricing = charging.getPricingInfo();
 log.info(`Mode: ${opts.resultsType} · proxy: ${proxyLabel} · ${proxyConfiguration ? 400 : 60} req/min · pricing: ${pricing.isPayPerEvent ? 'pay per event' : 'not PPE'} · max cost: ${Number.isFinite(pricing.maxTotalChargeUsd) ? `$${pricing.maxTotalChargeUsd}` : 'none'}`);
-if (!residential) log.warning('Instagram blocks datacenter IPs. Use Apify Proxy with the RESIDENTIAL group for reliable results.');
+
 
 const summary = {
     startedAt: new Date(startedAt).toISOString(), finishedAt: null, durationSec: null, stopReason: null, resultsType: opts.resultsType, proxy: proxyLabel,
@@ -79,7 +78,22 @@ const summary = {
     statusCounts: {}, skipReasons: {}, perInput: [], requests: { requests: 0, networkErrors: 0 }, methodsThatWorked: [], methodsThatFailed: [],
 };
 const bump = (o, k, n = 1) => { o[k] = (o[k] ?? 0) + n; };
-const client = new Client({ proxyConfiguration, msLeft, stats: summary.requests, saveRaw: opts.saveRawResponses });
+// Network routes, tried in order: the user's proxy, then (if fallback is on) Apify datacenter proxy, then the server's own IP.
+// Instagram rate-limits some IP pools far more than others; the client moves to the next route when one keeps getting blocked.
+const routes = [{ label: proxyConfiguration ? proxyLabel : 'no proxy (server IP)', proxy: proxyConfiguration }]; // the user's choice always comes first
+if (input.proxyFallback !== false) {
+    const isDatacenter = input.proxyConfiguration?.useApifyProxy && !groups.length;
+    const apifyProxyUsable = Actor.isAtHome() || Boolean(process.env.APIFY_PROXY_PASSWORD);
+    if (!isDatacenter && apifyProxyUsable) {
+        try {
+            const dc = await Actor.createProxyConfiguration({ useApifyProxy: true });
+            if (dc) routes.push({ label: 'Apify proxy (datacenter)', proxy: dc });
+        } catch { /* datacenter proxy not available on this account */ }
+    }
+    if (proxyConfiguration) routes.push({ label: 'no proxy (server IP)', proxy: undefined });
+}
+log.info(`Network routes: ${routes.map((r) => r.label).join(' → ')}`);
+const client = new Client({ routes, msLeft, stats: summary.requests, saveRaw: opts.saveRawResponses });
 const ep = makeEndpoints(client);
 
 let seenStore = null;
@@ -102,14 +116,14 @@ const FIX = {
     no_results: null,
     error: 'Unexpected error. Run again; if it repeats, send the run log and the DIAGNOSTICS record to the developer.',
 };
-const blockedHint = (err) => (residential
-    ? `Instagram refused every method for this input. Run it again in a few minutes (new residential IPs often get through). If it keeps failing, send the DIAGNOSTICS record from Storage → Key-value store to the developer. Last reply: ${err?.message ?? 'unknown'}`
-    : `Instagram blocked the request. This run used ${proxyLabel} — set Proxy configuration to Apify Proxy with the RESIDENTIAL group and run again.`);
+const blockedHint = (err) => (client.routes.length > 1
+    ? `Instagram rate-limited every network route this run tried (${client.routes.map((r) => r.label).join(', ')}). Run again in 10–15 minutes. If it keeps failing, send the DIAGNOSTICS record to the developer. Last reply: ${err?.message ?? 'unknown'}`
+    : `Instagram blocked the request. This run used ${proxyLabel}. Turn on "Automatic proxy fallback", or switch Proxy configuration (Apify datacenter or RESIDENTIAL), and run again.`);
 
 const WALL_TEXT = {
     comments: 'Comments', mentions: 'Mentions (tagged posts)', details: 'These details', posts: 'These posts', reels: 'These reels',
 };
-const loginHint = () => `${WALL_TEXT[opts.resultsType] ?? 'This data'} currently require a logged-in Instagram account for this input — Instagram showed its login wall on every method${residential ? '' : ` (proxy: ${proxyLabel}; try RESIDENTIAL)`}. Not charged. Profile posts and reels work without login; hashtags, places, comments and mentions are often walled. Run again later, as Instagram changes these walls often.`;
+const loginHint = () => `${WALL_TEXT[opts.resultsType] ?? 'This data'} currently require a logged-in Instagram account for this input — Instagram showed its login wall on every method. Not charged. Profile posts and reels work without login; hashtags, places, comments and mentions are often walled. Run again later, as Instagram changes these walls often.`;
 
 function saveFailed(t, status, error, fixHint) {
     bump(summary.statusCounts, status);
@@ -587,10 +601,11 @@ summary.notProcessed = summary.perInput.filter((r) => r.status === 'pending' || 
 const diag = client.diag.toJSON();
 summary.methodsThatWorked = Object.entries(diag).filter(([, v]) => v.successes).map(([k, v]) => `${k} (${v.successes}/${v.attempts})`);
 summary.methodsThatFailed = Object.entries(diag).filter(([, v]) => !v.successes).map(([k, v]) => `${k} (0/${v.attempts}: ${v.lastProblem})`);
+summary.routes = client.routesSummary();
 await Actor.setValue('RUN_SUMMARY', summary);
-await Actor.setValue('DIAGNOSTICS', { note: 'Per-method results for this run. Send this record to the developer if inputs come back "blocked".', proxy: proxyLabel, methods: diag });
+await Actor.setValue('DIAGNOSTICS', { note: 'Per-method results for this run. Send this record to the developer if inputs come back "blocked".', proxy: proxyLabel, routes: summary.routes, methods: diag });
 if (seenStore) await seenStore.setValue('SEEN_IDS', [...seenPrev]);
 const failedInputs = summary.perInput.filter((r) => !['ok'].includes(r.status)).length;
-const msg = `Saved ${summary.saved} results from ${summary.perInput.length - failedInputs}/${summary.perInput.length} inputs. Stop reason: ${summary.stopReason}.${summary.saved === 0 && summary.statusCounts.blocked ? ` Instagram blocked the requests${residential ? '' : ` (proxy: ${proxyLabel} — use RESIDENTIAL)`}.` : ''} See RUN_SUMMARY.`;
+const msg = `Saved ${summary.saved} results from ${summary.perInput.length - failedInputs}/${summary.perInput.length} inputs. Stop reason: ${summary.stopReason}.${summary.saved === 0 && summary.statusCounts.blocked ? ` Instagram blocked the requests on every route tried (${client.routes.slice(0, client.routeIdx + 1).map((r) => r.label).join(', ')}).` : ''} See RUN_SUMMARY.`;
 log.info(msg);
 await Actor.exit({ statusMessage: msg });

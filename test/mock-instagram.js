@@ -111,7 +111,7 @@ function postOwner(sc) {
  * @param {object} cfg  blockRate: random block share; alwaysBlocked: names of methods that always 401; down: everything blocked
  */
 export function startMock(cfg = {}) {
-    const { blockRate = 0.1, alwaysBlocked = [], loginWalled = [], delayMs = 0 } = cfg;
+    const { blockRate = 0.1, alwaysBlocked = [], loginWalled = [], delayMs = 0, proxyBlocked = false } = cfg;
     let seed = 99;
     const rand = () => {
         seed = (seed * 1103515245 + 12345) % 2147483648;
@@ -218,8 +218,10 @@ export function startMock(cfg = {}) {
                 if (!USERS[owner]) return send(res, 404, { message: 'User not found', status: 'fail' });
                 const u = USERS[owner];
                 const n = u.private ? 0 : u.posts;
-                const items = Array.from({ length: Math.min(12, n) }, (_, k) => v1Item(owner, k));
-                return send(res, 200, { items, num_results: items.length, more_available: n > 12, next_max_id: items.length ? items[items.length - 1].id : null,
+                const mx = q.get('max_id');
+                const start = /^\d+_\d+$/.test(mx ?? '') ? Array.from({ length: n }, (_, i) => mediaId(owner, i)).indexOf(mx.split('_')[0]) + 1 : 0;
+                const items = Array.from({ length: Math.max(0, Math.min(12, n - start)) }, (_, k) => v1Item(owner, start + k));
+                return send(res, 200, { items, num_results: items.length, more_available: start + 12 < n, next_max_id: items.length ? items[items.length - 1].id : null,
                     user: { pk: u.id, id: u.id, username: owner, full_name: owner.replace(/_/g, ' '), is_private: Boolean(u.private), is_verified: owner === 'natgeo', profile_pic_url: 'https://cdn.example/p.jpg' }, status: 'ok' });
             }
             case 'v1_feed_user': {
@@ -317,6 +319,12 @@ export function startMock(cfg = {}) {
     });
 
     const proxy = http.createServer((req, res) => {
+        hits.viaProxy = (hits.viaProxy ?? 0) + 1;
+        if (proxyBlocked) { // every request through this proxy pool is rate-limited, like an overused residential pool
+            res.writeHead(401, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ message: 'Please wait a few minutes before you try again.', require_login: true, status: 'fail' }));
+            return;
+        }
         const target = new URL(req.url);
         const up = http.request({ host: target.hostname, port: target.port, path: target.pathname + target.search, method: req.method, headers: req.headers }, (r) => {
             res.writeHead(r.statusCode, r.headers);

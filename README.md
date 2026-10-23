@@ -44,6 +44,8 @@ Instagram decides what logged-out visitors may see, and it changes this often. T
 | Profile details | ⚠️ Often login-walled | When walled, a **partial profile** from the public feed: name, ID, verified, private, avg likes/comments, last post and latest 12 posts. `missingFields` lists what Instagram withheld (followers, bio, contacts). Nothing is guessed. |
 | Comments, mentions, single-post details, hashtags, places, search | ⚠️ Usually login-walled | A free `login_required` row explaining it. The actor detects the wall after 2 tries and stops spending proxy traffic on it. |
 
+**Proxy:** Instagram rate-limits some IP pools much more than others. In October 2026 tests, shared residential IPs were often blocked while datacenter and server IPs worked for posts and reels. The default is Apify datacenter proxy, with **automatic fallback**: if the chosen proxy keeps getting blocked, the actor moves to the next network route by itself. `RUN_SUMMARY.routes` shows which route was used.
+
 The first input of every run goes alone, to learn which methods work before scaling to 25 parallel inputs. Every run writes `DIAGNOSTICS` with per-method results.
 
 ## 🔧 Input
@@ -68,7 +70,8 @@ The first input of every run goes alone, to learn which methods work before scal
   "resultsLimit": 50,
   "onlyPostsNewerThan": "30 days",
   "skipPinnedPosts": true,
-  "proxyConfiguration": { "useApifyProxy": true, "apifyProxyGroups": ["RESIDENTIAL"] }
+  "proxyConfiguration": { "useApifyProxy": true },
+  "proxyFallback": true
 }
 ```
 
@@ -151,7 +154,7 @@ Failed inputs, duplicates, items from previous runs and filtered items are **nev
 
 **Some inputs say `login_required`.** Instagram showed its login wall for that data type, and no method got past it. It isn't charged. Run again later; Instagram opens and closes these walls often.
 
-**Some inputs say `blocked`.** Keep Apify Proxy on **RESIDENTIAL** and run again; new IPs often get through. If it keeps happening, send the `DIAGNOSTICS` record to the developer.
+**Some inputs say `blocked`.** Instagram rate-limited every network route the run tried. Wait 10–15 minutes and run again, with "Automatic proxy fallback" on. If it keeps happening, send the `DIAGNOSTICS` record to the developer.
 
 **Can it scrape private accounts?** No. Profile details of a private account are returned, but its posts are not.
 

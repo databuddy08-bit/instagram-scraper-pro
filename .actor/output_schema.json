@@ -2,10 +2,25 @@
     "actorOutputSchemaVersion": 1,
     "title": "Instagram Scraper Pro output",
     "properties": {
-        "results": {
+        "posts": {
             "type": "string",
-            "title": "Results (Overview)",
+            "title": "Posts & reels",
             "template": "{{links.apiDefaultDatasetUrl}}/items?view=overview"
+        },
+        "comments": {
+            "type": "string",
+            "title": "Comments",
+            "template": "{{links.apiDefaultDatasetUrl}}/items?view=comments"
+        },
+        "profiles": {
+            "type": "string",
+            "title": "Profiles",
+            "template": "{{links.apiDefaultDatasetUrl}}/items?view=profiles"
+        },
+        "failed": {
+            "type": "string",
+            "title": "Failed inputs (free)",
+            "template": "{{links.apiDefaultDatasetUrl}}/items?view=failed"
         },
         "runSummary": {
             "type": "string",

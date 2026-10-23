@@ -3,7 +3,7 @@
     "fields": {},
     "views": {
         "overview": {
-            "title": "Overview",
+            "title": "Overview (posts & reels)",
             "transformation": {
                 "fields": [
                     "status",
@@ -39,44 +39,7 @@
                     "musicInfo",
                     "firstComment",
                     "latestComments",
-                    "text",
-                    "commentUrl",
-                    "postUrl",
-                    "repliesCount",
-                    "parentCommentId",
                     "ownerIsVerified",
-                    "username",
-                    "fullName",
-                    "biography",
-                    "followersCount",
-                    "followsCount",
-                    "postsCount",
-                    "verified",
-                    "private",
-                    "isBusinessAccount",
-                    "businessCategoryName",
-                    "category",
-                    "externalUrl",
-                    "businessEmail",
-                    "businessPhone",
-                    "emailsFromBio",
-                    "phonesFromBio",
-                    "avgLikes",
-                    "avgComments",
-                    "lastPostAt",
-                    "relatedProfiles",
-                    "name",
-                    "postsPerDayEstimate",
-                    "relatedHashtags",
-                    "locationId",
-                    "lat",
-                    "lng",
-                    "address",
-                    "city",
-                    "phone",
-                    "dataCompleteness",
-                    "missingFields",
-                    "missingReason",
                     "searchTerm",
                     "dataSource",
                     "id",
@@ -220,145 +183,9 @@
                         "label": "Latest comments",
                         "format": "array"
                     },
-                    "text": {
-                        "label": "Comment text",
-                        "format": "text"
-                    },
-                    "commentUrl": {
-                        "label": "Comment URL",
-                        "format": "link"
-                    },
-                    "postUrl": {
-                        "label": "Post URL",
-                        "format": "link"
-                    },
-                    "repliesCount": {
-                        "label": "Replies",
-                        "format": "number"
-                    },
-                    "parentCommentId": {
-                        "label": "Parent comment ID",
-                        "format": "text"
-                    },
                     "ownerIsVerified": {
                         "label": "Owner verified",
                         "format": "boolean"
-                    },
-                    "username": {
-                        "label": "Username",
-                        "format": "text"
-                    },
-                    "fullName": {
-                        "label": "Full name",
-                        "format": "text"
-                    },
-                    "biography": {
-                        "label": "Biography",
-                        "format": "text"
-                    },
-                    "followersCount": {
-                        "label": "Followers",
-                        "format": "number"
-                    },
-                    "followsCount": {
-                        "label": "Following",
-                        "format": "number"
-                    },
-                    "postsCount": {
-                        "label": "Posts count",
-                        "format": "number"
-                    },
-                    "verified": {
-                        "label": "Verified",
-                        "format": "boolean"
-                    },
-                    "private": {
-                        "label": "Private",
-                        "format": "boolean"
-                    },
-                    "isBusinessAccount": {
-                        "label": "Business account",
-                        "format": "boolean"
-                    },
-                    "businessCategoryName": {
-                        "label": "Business category",
-                        "format": "text"
-                    },
-                    "category": {
-                        "label": "Category",
-                        "format": "text"
-                    },
-                    "externalUrl": {
-                        "label": "External URL",
-                        "format": "link"
-                    },
-                    "businessEmail": {
-                        "label": "Business email",
-                        "format": "text"
-                    },
-                    "businessPhone": {
-                        "label": "Business phone",
-                        "format": "text"
-                    },
-                    "emailsFromBio": {
-                        "label": "Emails in bio",
-                        "format": "array"
-                    },
-                    "phonesFromBio": {
-                        "label": "Phones in bio",
-                        "format": "array"
-                    },
-                    "avgLikes": {
-                        "label": "Avg likes",
-                        "format": "number"
-                    },
-                    "avgComments": {
-                        "label": "Avg comments",
-                        "format": "number"
-                    },
-                    "lastPostAt": {
-                        "label": "Last post",
-                        "format": "date"
-                    },
-                    "relatedProfiles": {
-                        "label": "Related profiles",
-                        "format": "array"
-                    },
-                    "name": {
-                        "label": "Name (hashtag/place)",
-                        "format": "text"
-                    },
-                    "postsPerDayEstimate": {
-                        "label": "Posts per day (est.)",
-                        "format": "number"
-                    },
-                    "relatedHashtags": {
-                        "label": "Related hashtags",
-                        "format": "array"
-                    },
-                    "locationId": {
-                        "label": "Place ID",
-                        "format": "text"
-                    },
-                    "lat": {
-                        "label": "Latitude",
-                        "format": "number"
-                    },
-                    "lng": {
-                        "label": "Longitude",
-                        "format": "number"
-                    },
-                    "address": {
-                        "label": "Address",
-                        "format": "text"
-                    },
-                    "city": {
-                        "label": "City",
-                        "format": "text"
-                    },
-                    "phone": {
-                        "label": "Phone",
-                        "format": "text"
                     },
                     "searchTerm": {
                         "label": "Search term",
@@ -383,110 +210,6 @@
                     "scrapedAt": {
                         "label": "Scraped at",
                         "format": "date"
-                    },
-                    "dataCompleteness": {
-                        "label": "Data completeness",
-                        "format": "text"
-                    },
-                    "missingFields": {
-                        "label": "Missing fields",
-                        "format": "array"
-                    },
-                    "missingReason": {
-                        "label": "Why fields are missing",
-                        "format": "text"
-                    }
-                }
-            }
-        },
-        "posts": {
-            "title": "Posts & reels",
-            "transformation": {
-                "fields": [
-                    "url",
-                    "ownerUsername",
-                    "type",
-                    "productType",
-                    "caption",
-                    "likesCount",
-                    "commentsCount",
-                    "videoPlayCount",
-                    "engagementRate",
-                    "timestamp",
-                    "hashtags",
-                    "mentions",
-                    "displayUrl",
-                    "videoUrl",
-                    "isPinned",
-                    "inputUrl"
-                ]
-            },
-            "display": {
-                "component": "table",
-                "properties": {
-                    "url": {
-                        "label": "URL",
-                        "format": "link"
-                    },
-                    "ownerUsername": {
-                        "label": "Owner username",
-                        "format": "text"
-                    },
-                    "type": {
-                        "label": "Media type",
-                        "format": "text"
-                    },
-                    "productType": {
-                        "label": "Product type",
-                        "format": "text"
-                    },
-                    "caption": {
-                        "label": "Caption",
-                        "format": "text"
-                    },
-                    "likesCount": {
-                        "label": "Likes",
-                        "format": "number"
-                    },
-                    "commentsCount": {
-                        "label": "Comments",
-                        "format": "number"
-                    },
-                    "videoPlayCount": {
-                        "label": "Video plays",
-                        "format": "number"
-                    },
-                    "engagementRate": {
-                        "label": "Engagement rate %",
-                        "format": "number"
-                    },
-                    "timestamp": {
-                        "label": "Posted at",
-                        "format": "date"
-                    },
-                    "hashtags": {
-                        "label": "Hashtags",
-                        "format": "array"
-                    },
-                    "mentions": {
-                        "label": "Mentions",
-                        "format": "array"
-                    },
-                    "displayUrl": {
-                        "label": "Image",
-                        "format": "image"
-                    },
-                    "videoUrl": {
-                        "label": "Video URL",
-                        "format": "link"
-                    },
-                    "isPinned": {
-                        "label": "Pinned",
-                        "format": "boolean"
-                    },
-                    "inputUrl": {
-                        "label": "Input URL",
-                        "format": "link"
                     }
                 }
             }
@@ -626,6 +349,98 @@
                     "missingFields": {
                         "label": "Missing fields",
                         "format": "array"
+                    }
+                }
+            }
+        },
+        "hashtagsPlaces": {
+            "title": "Hashtags & places",
+            "transformation": {
+                "fields": [
+                    "status",
+                    "resultType",
+                    "inputUrl",
+                    "name",
+                    "postsCount",
+                    "postsPerDayEstimate",
+                    "relatedHashtags",
+                    "locationId",
+                    "category",
+                    "lat",
+                    "lng",
+                    "address",
+                    "city",
+                    "phone",
+                    "url",
+                    "scrapedAt"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "status": {
+                        "label": "Status",
+                        "format": "text"
+                    },
+                    "resultType": {
+                        "label": "Result type",
+                        "format": "text"
+                    },
+                    "inputUrl": {
+                        "label": "Input URL",
+                        "format": "link"
+                    },
+                    "name": {
+                        "label": "Name",
+                        "format": "text"
+                    },
+                    "postsCount": {
+                        "label": "Posts count",
+                        "format": "number"
+                    },
+                    "postsPerDayEstimate": {
+                        "label": "Posts per day (est.)",
+                        "format": "number"
+                    },
+                    "relatedHashtags": {
+                        "label": "Related hashtags",
+                        "format": "array"
+                    },
+                    "locationId": {
+                        "label": "Place ID",
+                        "format": "text"
+                    },
+                    "category": {
+                        "label": "Category",
+                        "format": "text"
+                    },
+                    "lat": {
+                        "label": "Latitude",
+                        "format": "number"
+                    },
+                    "lng": {
+                        "label": "Longitude",
+                        "format": "number"
+                    },
+                    "address": {
+                        "label": "Address",
+                        "format": "text"
+                    },
+                    "city": {
+                        "label": "City",
+                        "format": "text"
+                    },
+                    "phone": {
+                        "label": "Phone",
+                        "format": "text"
+                    },
+                    "url": {
+                        "label": "URL",
+                        "format": "link"
+                    },
+                    "scrapedAt": {
+                        "label": "Scraped at",
+                        "format": "date"
                     }
                 }
             }

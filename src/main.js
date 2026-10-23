@@ -210,7 +210,13 @@ async function emitPosts(t, posts, method, { ordered, followers, filter } = {}) 
         }
         if (followers && p.likesCount !== null) p.engagementRate = Math.round((((p.likesCount ?? 0) + (p.commentsCount ?? 0)) / followers) * 10000) / 100;
         else p.engagementRate ??= null;
-        p.ownerFollowersCount = followers ?? null;
+        // Owner fields Instagram leaves out of some responses: fill from the profile being scraped (only when it is the same account).
+        if (t.parent?.type === 'profile' && p.ownerUsername === t.parent.username) {
+            p.ownerFullName ??= t.parent.fullName ?? null;
+            p.ownerIsVerified ??= t.parent.verified ?? null;
+            p.ownerFollowersCount = followers ?? null;
+        } else p.ownerFollowersCount = p.ownerUsername === t.parent?.username ? (followers ?? null) : null;
+        if (p.ownerFollowersCount === null) p.engagementRate = null; // collab posts by other accounts: their follower count is unknown
         const r = await emit(t, 'post', p, method);
         if (!r.saved) note(t, r.reason);
         if (r.old && !r.pinned) oldInRow += 1;
